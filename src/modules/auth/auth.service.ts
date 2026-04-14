@@ -30,7 +30,7 @@ export const authService = {
 
     if (shopErr) {
       console.error('AUTH register shop error:', shopErr)
-      throw new Error(`Erro ao criar barbearia: ${shopErr.message}`)
+      throw new Error(shopErr.message)
     }
 
     const { data: user, error: userErr } = await supabaseAdmin
@@ -47,13 +47,13 @@ export const authService = {
 
     if (userErr) {
       console.error('AUTH register user error:', userErr)
-      throw new Error(`Erro ao criar usuário: ${userErr.message}`)
+      throw new Error(userErr.message)
     }
 
     const token = jwt.sign(
       { userId: user.id, barbershopId: shop.id, role: 'owner' } as AuthPayload,
       process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { expiresIn: '7d' }
     )
 
     return { token, user, barbershop: shop }
@@ -61,6 +61,7 @@ export const authService = {
 
   async login(email: string) {
     const normalizedEmail = email.trim().toLowerCase()
+    console.log('AUTH login attempt:', normalizedEmail)
 
     const { data: shop, error: shopErr } = await supabaseAdmin
       .from('barbershops')
@@ -73,8 +74,9 @@ export const authService = {
       throw new Error(`Erro ao buscar barbearia: ${shopErr.message}`)
     }
 
+    console.log('AUTH login shop result:', shop)
+
     if (!shop) {
-      console.error('AUTH login: shop not found for email', normalizedEmail)
       throw new Error('Credenciais inválidas')
     }
 
@@ -91,15 +93,16 @@ export const authService = {
       throw new Error(`Erro ao buscar usuário: ${userErr.message}`)
     }
 
+    console.log('AUTH login user result:', user)
+
     if (!user) {
-      console.error('AUTH login: user not found for email/shop', normalizedEmail, shop.id)
       throw new Error('Credenciais inválidas')
     }
 
     const token = jwt.sign(
       { userId: user.id, barbershopId: shop.id, role: user.role } as AuthPayload,
       process.env.JWT_SECRET!,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { expiresIn: '7d' }
     )
 
     return { token, user, barbershop: shop }
