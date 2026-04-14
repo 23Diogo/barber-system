@@ -3,10 +3,11 @@ import { supabaseAdmin } from '../../config/supabase'
 import { AuthPayload } from '../../middleware/auth'
 
 export const authService = {
-
   async register(data: { barbershopName: string; ownerName: string; email: string; phone: string }) {
     const trialEnd = new Date()
     trialEnd.setDate(trialEnd.getDate() + 14)
+
+    const normalizedEmail = data.email.trim().toLowerCase()
 
     const slug = data.barbershopName.toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -14,40 +15,91 @@ export const authService = {
 
     const { data: shop, error: shopErr } = await supabaseAdmin
       .from('barbershops')
-      .insert({ name: data.barbershopName, slug, owner_name: data.ownerName, email: data.email, phone: data.phone, plan_status: 'trial', trial_ends_at: trialEnd.toISOString(), is_active: true })
-      .select().single()
+      .insert({
+        name: data.barbershopName,
+        slug,
+        owner_name: data.ownerName,
+        email: normalizedEmail,
+        phone: data.phone,
+        plan_status: 'trial',
+        trial_ends_at: trialEnd.toISOString(),
+        is_active: true
+      })
+      .select()
+      .single()
 
-    if (shopErr) throw new Error(shopErr.message)
+    if (shopErr) {
+      console.error('AUTH register shop error:', shopErr)
+      throw new Error(`Erro ao criar barbearia: ${shopErr.message}`)
+    }
 
     const { data: user, error: userErr } = await supabaseAdmin
       .from('users')
-      .insert({ barbershop_id: shop.id, name: data.ownerName, email: data.email, phone: data.phone, role: 'owner' })
-      .select().single()
+      .insert({
+        barbershop_id: shop.id,
+        name: data.ownerName,
+        email: normalizedEmail,
+        phone: data.phone,
+        role: 'owner'
+      })
+      .select()
+      .single()
 
-    if (userErr) throw new Error(userErr.message)
+    if (userErr) {
+      console.error('AUTH register user error:', userErr)
+      throw new Error(`Erro ao criar usuário: ${userErr.message}`)
+    }
 
     const token = jwt.sign(
       { userId: user.id, barbershopId: shop.id, role: 'owner' } as AuthPayload,
-      process.env.JWT_SECRET!, { expiresIn: '7d' }
+      process.env.JWT_SECRET!,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     )
 
     return { token, user, barbershop: shop }
   },
 
   async login(email: string) {
-    const { data: shop } = await supabaseAdmin
-      .from('barbershops').select('id, name, is_active, plan_status').eq('email', email).maybeSingle()
+    const normalizedEmail = email.trim().toLowerCase()
 
-    if (!shop) throw new Error('Credenciais inválidas')
+    const { data: shop, error: shopErr } = await supabaseAdmin
+      .from('barbershops')
+      .select('id, name, is_active, plan_status, email')
+      .ilike('email', normalizedEmail)
+      .maybeSingle()
 
-    const { data: user } = await supabaseAdmin
-      .from('users').select('*').eq('barbershop_id', shop.id).eq('email', email).eq('is_active', true).maybeSingle()
+    if (shopErr) {
+      console.error('AUTH login shop error:', shopErr)
+      throw new Error(`Erro ao buscar barbearia: ${shopErr.message}`)
+    }
 
-    if (!user) throw new Error('Credenciais inválidas')
+    if (!shop) {
+      console.error('AUTH login: shop not found for email', normalizedEmail)
+      throw new Error('Credenciais inválidas')
+    }
+
+    const { data: user, error: userErr } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('barbershop_id', shop.id)
+      .ilike('email', normalizedEmail)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (userErr) {
+      console.error('AUTH login user error:', userErr)
+      throw new Error(`Erro ao buscar usuário: ${userErr.message}`)
+    }
+
+    if (!user) {
+      console.error('AUTH login: user not found for email/shop', normalizedEmail, shop.id)
+      throw new Error('Credenciais inválidas')
+    }
 
     const token = jwt.sign(
       { userId: user.id, barbershopId: shop.id, role: user.role } as AuthPayload,
-      process.env.JWT_SECRET!, { expiresIn: '7d' }
+      process.env.JWT_SECRET!,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     )
 
     return { token, user, barbershop: shop }
