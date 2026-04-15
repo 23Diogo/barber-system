@@ -30,8 +30,8 @@ export const subscriptionsService = {
       .single()
 
     if (planError || !plan) throw new Error('Plano não encontrado')
-
     const { data, error } = await supabaseAdmin.rpc('create_subscription_with_initial_invoice', {
+      p_barbershop_id: barbershopId,
       p_client_id: client_id,
       p_plan_id: plan_id,
       p_gateway_provider: gateway_provider,
@@ -42,7 +42,7 @@ export const subscriptionsService = {
       p_external_checkout_id: external_checkout_id,
       p_external_subscription_id: external_subscription_id,
     })
-
+  
     if (error) throw new Error(error.message)
 
     const result = Array.isArray(data) ? data[0] : data
