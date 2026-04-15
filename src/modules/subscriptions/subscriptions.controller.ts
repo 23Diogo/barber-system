@@ -18,13 +18,26 @@ export const list = async (req: Request, res: Response) => {
       .eq('barbershop_id', req.user!.barbershopId)
       .order('created_at', { ascending: false })
 
-    if (status)    query = query.eq('status', status as string)
+    if (status) query = query.eq('status', status as string)
     if (client_id) query = query.eq('client_id', client_id as string)
 
     const { data, error } = await query
     if (error) throw error
 
     res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const getActiveByClient = async (req: Request, res: Response) => {
+  try {
+    const data = await subscriptionsService.getActiveByClient(
+      req.params.clientId,
+      req.user!.barbershopId
+    )
+
+    res.json(data || null)
   } catch (err: any) {
     res.status(400).json({ error: err.message })
   }
