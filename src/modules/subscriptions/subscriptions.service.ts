@@ -73,16 +73,6 @@ export const subscriptionsService = {
     const result = Array.isArray(data) ? data[0] : data
     if (!result?.subscription_id) return result
 
-    await supabaseAdmin
-      .from('subscriptions')
-      .update({ barbershop_id: barbershopId })
-      .eq('id', result.subscription_id)
-
-    await supabaseAdmin
-      .from('subscription_invoices')
-      .update({ barbershop_id: barbershopId })
-      .eq('subscription_id', result.subscription_id)
-
     const { data: fullData, error: fullError } = await supabaseAdmin
       .from('subscriptions')
       .select(`
@@ -99,6 +89,26 @@ export const subscriptionsService = {
     if (fullError) throw new Error(fullError.message)
 
     return fullData
+  },
+
+  async changeStatus(id: string, barbershopId: string, status: string) {
+    const { data, error } = await supabaseAdmin
+      .from('subscriptions')
+      .update({ status })
+      .eq('id', id)
+      .eq('barbershop_id', barbershopId)
+      .select(`
+        *,
+        clients(id, name, phone, whatsapp),
+        plans(*),
+        subscription_cycles(*),
+        subscription_invoices(*)
+      `)
+      .single()
+
+    if (error) throw new Error(error.message)
+
+    return data
   },
 
   async generateNextCycle(id: string, barbershopId: string, dueAt: string) {
@@ -153,7 +163,9 @@ export const subscriptionsService = {
       .single()
 
     if (aptError || !apt) throw new Error('Agendamento não encontrado')
-    if (apt.client_id !== sub.client_id) throw new Error('O cliente do agendamento não corresponde ao cliente da assinatura')
+    if (apt.client_id !== sub.client_id) {
+      throw new Error('O cliente do agendamento não corresponde ao cliente da assinatura')
+    }
 
     const { data, error } = await supabaseAdmin.rpc('consume_subscription_benefit', {
       p_subscription_id: id,
@@ -167,5 +179,5 @@ export const subscriptionsService = {
     if (error) throw new Error(error.message)
 
     return data
-  }
+  },
 }
