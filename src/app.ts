@@ -49,6 +49,9 @@ app.use('/api/loyalty',      loyaltyRoutes)
 app.use('/api/whatsapp',     whatsappRoutes)
 app.use('/api/marketing',    marketingRoutes)
 app.use('/api/dashboard',    dashboardRoutes)
+app.use('/api/plans', plansRoutes);
+app.use('/api/subscriptions', subscriptionsRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('❌', err.message)
