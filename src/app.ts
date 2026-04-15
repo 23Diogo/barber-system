@@ -17,6 +17,10 @@ import whatsappRoutes    from './modules/whatsapp/whatsapp.routes'
 import marketingRoutes   from './modules/marketing/marketing.routes'
 import dashboardRoutes   from './modules/dashboard/dashboard.routes'
 
+import plansRoutes from './modules/plans/plans.routes'
+import subscriptionsRoutes from './modules/subscriptions/subscriptions.routes'
+import paymentsRoutes from './modules/payments/payments.routes'
+
 import { startLicenseCheckJob } from './jobs/checkLicenses'
 import { startReminderJob }     from './jobs/sendReminders'
 import { startReactivationJob } from './jobs/reactivation'
@@ -37,21 +41,21 @@ app.get('/health', (_, res) =>
   res.json({ status: 'ok', app: 'BarberFlow API', version: '1.0.0' })
 )
 
-app.use('/api/auth',         authRoutes)
-app.use('/api/barbershops',  barbershopRoutes)
-app.use('/api/appointments', appointmentRoutes)
-app.use('/api/clients',      clientRoutes)
-app.use('/api/services',     serviceRoutes)
-app.use('/api/barbers',      barberRoutes)
-app.use('/api/financial',    financialRoutes)
-app.use('/api/stock',        stockRoutes)
-app.use('/api/loyalty',      loyaltyRoutes)
-app.use('/api/whatsapp',     whatsappRoutes)
-app.use('/api/marketing',    marketingRoutes)
-app.use('/api/dashboard',    dashboardRoutes)
-app.use('/api/plans', plansRoutes);
+app.use('/api/auth',          authRoutes)
+app.use('/api/barbershops',   barbershopRoutes)
+app.use('/api/appointments',  appointmentRoutes)
+app.use('/api/clients',       clientRoutes)
+app.use('/api/services',      serviceRoutes)
+app.use('/api/barbers',       barberRoutes)
+app.use('/api/financial',     financialRoutes)
+app.use('/api/stock',         stockRoutes)
+app.use('/api/loyalty',       loyaltyRoutes)
+app.use('/api/whatsapp',      whatsappRoutes)
+app.use('/api/marketing',     marketingRoutes)
+app.use('/api/dashboard',     dashboardRoutes)
+app.use('/api/plans',         plansRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
-app.use('/api/payments', paymentsRoutes);
+app.use('/api/payments',      paymentsRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('❌', err.message)
