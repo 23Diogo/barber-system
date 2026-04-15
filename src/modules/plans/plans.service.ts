@@ -1,16 +1,92 @@
 import { supabaseAdmin } from '../../config/supabase'
 
+function toTrimmedString(value: any) {
+  return String(value ?? '').trim()
+}
+
+function parseNonNegativeInteger(value: any, fieldLabel: string, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback
+
+  const parsed = Number(value)
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${fieldLabel} deve ser um número inteiro maior ou igual a zero.`)
+  }
+
+  return parsed
+}
+
+function parseBillingInterval(value: any) {
+  return String(value) === 'year' ? 'year' : 'month'
+}
+
+function parsePrice(value: any) {
+  const raw = String(value ?? '')
+    .trim()
+    .replace(',', '.')
+
+  if (!raw) {
+    throw new Error('Preço é obrigatório.')
+  }
+
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)) {
+    throw new Error('Preço inválido. Use o formato 69,90.')
+  }
+
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error('Preço inválido. Use o formato 69,90.')
+  }
+
+  return Number(parsed.toFixed(2))
+}
+
+function normalizePlanPayload(body: any) {
+  const name = toTrimmedString(body.name)
+  const description = toTrimmedString(body.description)
+  const price = parsePrice(body.price)
+
+  if (!name) {
+    throw new Error('Nome é obrigatório.')
+  }
+
+  if (name.length > 100) {
+    throw new Error('Nome deve ter no máximo 100 caracteres.')
+  }
+
+  if (description.length > 500) {
+    throw new Error('Descrição deve ter no máximo 500 caracteres.')
+  }
+
+  return {
+    name,
+    description: description || null,
+    price,
+    price_cents: Math.round(price * 100),
+    currency: toTrimmedString(body.currency) || 'BRL',
+    billing_interval: parseBillingInterval(body.billing_interval),
+    billing_interval_count: parseNonNegativeInteger(body.billing_interval_count, 'Periodicidade', 1) || 1,
+    included_haircuts: parseNonNegativeInteger(body.included_haircuts, 'Cortes incluídos', 0),
+    included_beards: parseNonNegativeInteger(body.included_beards, 'Barbas incluídas', 0),
+    signup_fee_cents: parseNonNegativeInteger(body.signup_fee_cents, 'Taxa de adesão', 0),
+    grace_days: parseNonNegativeInteger(body.grace_days, 'Carência', 0),
+    is_active: body.is_active === undefined ? true : Boolean(body.is_active),
+  }
+}
+
 export const plansService = {
   async create(barbershopId: string, body: any) {
     const {
       service_entitlements = [],
-      ...planBody
     } = body
+
+    const normalizedPlanBody = normalizePlanPayload(body)
 
     const { data: plan, error: planError } = await supabaseAdmin
       .from('plans')
       .insert({
-        ...planBody,
+        ...normalizedPlanBody,
         barbershop_id: barbershopId,
       })
       .select()
@@ -50,8 +126,9 @@ export const plansService = {
   async update(id: string, barbershopId: string, body: any) {
     const {
       service_entitlements,
-      ...planBody
     } = body
+
+    const normalizedPlanBody = normalizePlanPayload(body)
 
     const { data: existingPlan, error: existingError } = await supabaseAdmin
       .from('plans')
@@ -64,7 +141,7 @@ export const plansService = {
 
     const { error: updateError } = await supabaseAdmin
       .from('plans')
-      .update(planBody)
+      .update(normalizedPlanBody)
       .eq('id', existingPlan.id)
       .eq('barbershop_id', barbershopId)
 
