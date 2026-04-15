@@ -90,5 +90,19 @@ export const paymentsService = {
     if (error) throw new Error(error.message)
 
     return data
-  }
+  },
+
+  async changeInvoiceStatus(invoiceId: string, barbershopId: string, status: string) {
+    const { data, error } = await supabaseAdmin
+      .from('subscription_invoices')
+      .update({ status })
+      .eq('id', invoiceId)
+      .eq('barbershop_id', barbershopId)
+      .select()
+      .single()
+
+    if (error) throw new Error(error.message)
+
+    return data
+  },
 }
