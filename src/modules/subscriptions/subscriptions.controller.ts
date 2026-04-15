@@ -101,6 +101,58 @@ export const update = async (req: Request, res: Response) => {
   }
 }
 
+export const activate = async (req: Request, res: Response) => {
+  try {
+    const data = await subscriptionsService.changeStatus(
+      req.params.id,
+      req.user!.barbershopId,
+      'active'
+    )
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const pause = async (req: Request, res: Response) => {
+  try {
+    const data = await subscriptionsService.changeStatus(
+      req.params.id,
+      req.user!.barbershopId,
+      'paused'
+    )
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const reactivate = async (req: Request, res: Response) => {
+  try {
+    const data = await subscriptionsService.changeStatus(
+      req.params.id,
+      req.user!.barbershopId,
+      'active'
+    )
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const cancel = async (req: Request, res: Response) => {
+  try {
+    const data = await subscriptionsService.changeStatus(
+      req.params.id,
+      req.user!.barbershopId,
+      'canceled'
+    )
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
 export const generateNextCycle = async (req: Request, res: Response) => {
   try {
     const dueAt = req.body?.due_at || new Date().toISOString()
