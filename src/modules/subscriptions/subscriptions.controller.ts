@@ -11,7 +11,7 @@ export const list = async (req: Request, res: Response) => {
       .select(`
         *,
         clients(id, name, phone, whatsapp),
-        plans(id, name, price_cents, billing_interval, billing_interval_count),
+        plans(*),
         subscription_cycles(*),
         subscription_invoices(*)
       `)
