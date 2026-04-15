@@ -7,6 +7,10 @@ import {
   getActiveByClient,
   create,
   update,
+  activate,
+  pause,
+  reactivate,
+  cancel,
   generateNextCycle,
   consume,
 } from './subscriptions.controller'
@@ -19,6 +23,12 @@ router.get('/client/:clientId/active', getActiveByClient)
 router.get('/:id', getOne)
 router.post('/', create)
 router.patch('/:id', update)
+
+router.post('/:id/activate', activate)
+router.post('/:id/pause', pause)
+router.post('/:id/reactivate', reactivate)
+router.post('/:id/cancel', cancel)
+
 router.post('/:id/generate-next-cycle', generateNextCycle)
 router.post('/:id/consume', consume)
 
