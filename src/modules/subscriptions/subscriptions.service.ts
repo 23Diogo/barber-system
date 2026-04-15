@@ -1,6 +1,30 @@
 import { supabaseAdmin } from '../../config/supabase'
 
 export const subscriptionsService = {
+  async getActiveByClient(clientId: string, barbershopId: string) {
+    const { data, error } = await supabaseAdmin
+      .from('subscriptions')
+      .select(`
+        *,
+        clients(id, name, phone, whatsapp),
+        plans(*),
+        subscription_cycles(
+          *,
+          subscription_cycle_service_balances(*, services(id, name))
+        ),
+        subscription_invoices(*)
+      `)
+      .eq('client_id', clientId)
+      .eq('barbershop_id', barbershopId)
+      .in('status', ['active', 'trialing', 'past_due', 'paused', 'pending_activation'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (error) throw new Error(error.message)
+
+    return Array.isArray(data) && data.length ? data[0] : null
+  },
+
   async create(barbershopId: string, body: any) {
     const {
       client_id,
@@ -30,6 +54,7 @@ export const subscriptionsService = {
       .single()
 
     if (planError || !plan) throw new Error('Plano não encontrado')
+
     const { data, error } = await supabaseAdmin.rpc('create_subscription_with_initial_invoice', {
       p_barbershop_id: barbershopId,
       p_client_id: client_id,
@@ -42,7 +67,7 @@ export const subscriptionsService = {
       p_external_checkout_id: external_checkout_id,
       p_external_subscription_id: external_subscription_id,
     })
-  
+
     if (error) throw new Error(error.message)
 
     const result = Array.isArray(data) ? data[0] : data
@@ -63,7 +88,7 @@ export const subscriptionsService = {
       .select(`
         *,
         clients(id, name, phone, whatsapp),
-        plans(id, name, price_cents, billing_interval, billing_interval_count),
+        plans(*),
         subscription_cycles(*),
         subscription_invoices(*)
       `)
