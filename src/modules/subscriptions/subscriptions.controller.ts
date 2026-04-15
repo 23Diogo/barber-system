@@ -58,7 +58,6 @@ export const getOne = async (req: Request, res: Response) => {
         subscription_invoices(*),
         subscription_consumptions(
           *,
-          appointments(id, scheduled_at, status),
           services(id, name)
         )
       `)
