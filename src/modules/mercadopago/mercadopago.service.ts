@@ -4,12 +4,14 @@ type CreatePreferenceInput = {
   title: string;
   quantity: number;
   unitPrice: number;
+  externalReference?: string;
 };
 
 export async function createMercadoPagoPreference({
   title,
   quantity,
   unitPrice,
+  externalReference,
 }: CreatePreferenceInput) {
   const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
@@ -26,6 +28,7 @@ export async function createMercadoPagoPreference({
           currency_id: 'BRL',
         },
       ],
+      external_reference: externalReference || undefined,
       back_urls: {
         success: `${mercadoPagoConfig.frontendUrl}/success.html`,
         failure: `${mercadoPagoConfig.frontendUrl}/failure.html`,
@@ -39,6 +42,23 @@ export async function createMercadoPagoPreference({
 
   if (!response.ok) {
     throw new Error(data?.message || 'Erro ao criar preferência no Mercado Pago');
+  }
+
+  return data;
+}
+
+export async function getMercadoPagoPayment(paymentId: string | number) {
+  const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${mercadoPagoConfig.accessToken}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.message || 'Erro ao consultar pagamento no Mercado Pago');
   }
 
   return data;
