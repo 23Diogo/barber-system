@@ -5,6 +5,7 @@ import helmet from 'helmet'
 import morgan from 'morgan'
 
 import authRoutes from './modules/auth/auth.routes'
+import clientAuthRoutes from './modules/client-auth/client-auth.routes'
 import barbershopRoutes from './modules/barbershops/barbershops.routes'
 import appointmentRoutes from './modules/appointments/appointments.routes'
 import clientRoutes from './modules/clients/clients.routes'
@@ -33,7 +34,6 @@ app.use(helmet())
 app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }))
 app.use(morgan('dev'))
 
-// WhatsApp webhook precisa do body raw
 app.use('/api/whatsapp/webhook', express.raw({ type: '*/*' }))
 
 app.use(express.json())
@@ -44,6 +44,7 @@ app.get('/health', (_, res) =>
 )
 
 app.use('/api/auth', authRoutes)
+app.use('/api/client-auth', clientAuthRoutes)
 app.use('/api/barbershops', barbershopRoutes)
 app.use('/api/appointments', appointmentRoutes)
 app.use('/api/clients', clientRoutes)
@@ -68,6 +69,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 app.listen(PORT, () => {
   console.log(`\n💈 BarberFlow API → http://localhost:${PORT}`)
   console.log(`❤️  Health       → http://localhost:${PORT}/health`)
+  console.log(`👤 Client Auth   → http://localhost:${PORT}/api/client-auth/login`)
   console.log(`💳 Mercado Pago → http://localhost:${PORT}/api/mercadopago/create-preference\n`)
 
   startLicenseCheckJob()
