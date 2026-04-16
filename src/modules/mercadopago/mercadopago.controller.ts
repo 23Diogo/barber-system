@@ -3,12 +3,13 @@ import { createMercadoPagoPreference } from './mercadopago.service';
 
 export async function createPreferenceController(req: Request, res: Response) {
   try {
-    const { title, quantity, unitPrice } = req.body;
+    const { title, quantity, unitPrice, externalReference } = req.body;
 
     const preference = await createMercadoPagoPreference({
       title: title || 'Teste BarberFlow',
       quantity: Number(quantity || 1),
       unitPrice: Number(unitPrice || 10),
+      externalReference: externalReference || undefined,
     });
 
     return res.status(200).json({
