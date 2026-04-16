@@ -12,6 +12,7 @@ import {
 
 const router = Router()
 
+router.post('/webhook/:provider', webhook)
 router.post('/webhook', webhook)
 
 router.use(authenticate, checkLicense)
