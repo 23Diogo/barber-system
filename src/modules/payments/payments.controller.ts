@@ -4,7 +4,16 @@ import { paymentsService } from './payments.service'
 
 export const webhook = async (req: Request, res: Response) => {
   try {
-    const data = await paymentsService.processWebhook(req.body, req.headers)
+    const provider =
+      String(req.params.provider || req.query.provider || req.body?.provider || 'gateway').toLowerCase()
+
+    const data = await paymentsService.processWebhook(
+      provider,
+      req.body,
+      req.headers,
+      req.query
+    )
+
     res.status(200).json(data)
   } catch (err: any) {
     res.status(400).json({ error: err.message })
