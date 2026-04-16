@@ -84,6 +84,63 @@ function mapMercadoPagoStatus(status: string) {
   return 'pending'
 }
 
+function mapInvoiceStatusToSubscriptionStatus(invoiceStatus: string) {
+  if (invoiceStatus === 'paid') return 'active'
+  if (invoiceStatus === 'failed') return 'past_due'
+  return null
+}
+
+async function syncSubscriptionStatusBySubscriptionId(subscriptionId: string, invoiceStatus: string) {
+  const nextSubscriptionStatus = mapInvoiceStatusToSubscriptionStatus(invoiceStatus)
+  if (!nextSubscriptionStatus) return
+
+  const { data: subscription, error: subscriptionError } = await supabaseAdmin
+    .from('subscriptions')
+    .select('id, status')
+    .eq('id', subscriptionId)
+    .single()
+
+  if (subscriptionError) throw new Error(subscriptionError.message)
+  if (!subscription) return
+
+  if (subscription.status === 'paused' || subscription.status === 'canceled') {
+    return
+  }
+
+  if (subscription.status === nextSubscriptionStatus) {
+    return
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from('subscriptions')
+    .update({ status: nextSubscriptionStatus })
+    .eq('id', subscriptionId)
+
+  if (updateError) throw new Error(updateError.message)
+}
+
+async function syncSubscriptionStatusByExternalInvoiceId(
+  provider: string,
+  externalInvoiceId: string,
+  invoiceStatus: string
+) {
+  if (!externalInvoiceId) return
+
+  const { data: invoice, error: invoiceError } = await supabaseAdmin
+    .from('subscription_invoices')
+    .select('id, subscription_id, external_invoice_id, gateway_provider')
+    .eq('external_invoice_id', externalInvoiceId)
+    .eq('gateway_provider', provider)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (invoiceError) throw new Error(invoiceError.message)
+  if (!invoice?.subscription_id) return
+
+  await syncSubscriptionStatusBySubscriptionId(invoice.subscription_id, invoiceStatus)
+}
+
 export const paymentsService = {
   async processWebhook(provider: string, body: any, headers: any, query: any = {}) {
     if (provider === 'mercadopago') {
@@ -140,6 +197,8 @@ export const paymentsService = {
         })
 
         if (error) throw new Error(error.message)
+
+        await syncSubscriptionStatusByExternalInvoiceId('mercadopago', externalReference, 'paid')
       }
 
       if (externalReference && mappedStatus === 'failed') {
@@ -151,6 +210,8 @@ export const paymentsService = {
         })
 
         if (error) throw new Error(error.message)
+
+        await syncSubscriptionStatusByExternalInvoiceId('mercadopago', externalReference, 'failed')
       }
 
       return {
@@ -195,6 +256,8 @@ export const paymentsService = {
       })
 
       if (error) throw new Error(error.message)
+
+      await syncSubscriptionStatusByExternalInvoiceId(provider || 'gateway', externalInvoiceId, 'paid')
     }
 
     if (eventType === 'payment_failed' && externalInvoiceId) {
@@ -206,6 +269,8 @@ export const paymentsService = {
       })
 
       if (error) throw new Error(error.message)
+
+      await syncSubscriptionStatusByExternalInvoiceId(provider || 'gateway', externalInvoiceId, 'failed')
     }
 
     return { ok: true, event: eventData }
@@ -261,10 +326,14 @@ export const paymentsService = {
       .update({ status })
       .eq('id', invoiceId)
       .eq('barbershop_id', barbershopId)
-      .select()
+      .select('id, subscription_id, status')
       .single()
 
     if (error) throw new Error(error.message)
+
+    if (data?.subscription_id && (status === 'paid' || status === 'failed')) {
+      await syncSubscriptionStatusBySubscriptionId(data.subscription_id, status)
+    }
 
     return data
   },
