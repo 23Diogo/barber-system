@@ -8,6 +8,9 @@ import {
   createPortalAppointment,
   listPortalAppointments,
   cancelPortalAppointment,
+  listPortalPlans,
+  getPortalSubscription,
+  createPortalSubscriptionCheckout,
 } from './client-portal.controller'
 
 const router = Router()
@@ -22,5 +25,9 @@ router.get('/available-slots', listPortalAvailableSlots)
 router.get('/appointments', listPortalAppointments)
 router.post('/appointments', createPortalAppointment)
 router.patch('/appointments/:id/cancel', cancelPortalAppointment)
+
+router.get('/plans', listPortalPlans)
+router.get('/subscription', getPortalSubscription)
+router.post('/subscriptions/checkout', createPortalSubscriptionCheckout)
 
 export default router
