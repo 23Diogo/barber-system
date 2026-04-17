@@ -6,6 +6,7 @@ import morgan from 'morgan'
 
 import authRoutes from './modules/auth/auth.routes'
 import clientAuthRoutes from './modules/client-auth/client-auth.routes'
+import clientPortalRoutes from './modules/client-portal/client-portal.routes'
 import barbershopRoutes from './modules/barbershops/barbershops.routes'
 import appointmentRoutes from './modules/appointments/appointments.routes'
 import clientRoutes from './modules/clients/clients.routes'
@@ -45,6 +46,8 @@ app.get('/health', (_, res) =>
 
 app.use('/api/auth', authRoutes)
 app.use('/api/client-auth', clientAuthRoutes)
+app.use('/api/client-portal', clientPortalRoutes)
+
 app.use('/api/barbershops', barbershopRoutes)
 app.use('/api/appointments', appointmentRoutes)
 app.use('/api/clients', clientRoutes)
@@ -70,6 +73,7 @@ app.listen(PORT, () => {
   console.log(`\n💈 BarberFlow API → http://localhost:${PORT}`)
   console.log(`❤️  Health       → http://localhost:${PORT}/health`)
   console.log(`👤 Client Auth   → http://localhost:${PORT}/api/client-auth/login`)
+  console.log(`📲 Client Portal → http://localhost:${PORT}/api/client-portal/context`)
   console.log(`💳 Mercado Pago → http://localhost:${PORT}/api/mercadopago/create-preference\n`)
 
   startLicenseCheckJob()
