@@ -987,5 +987,55 @@ export const clientPortalService = {
       },
     }
   },
-  
+  async cancelPendingSubscription(auth: ClientAuthPayload, body: any) {
+    const reason = normalizeText(body?.reason) || 'Contratação cancelada pelo cliente'
+
+    const { data: subscription, error: subscriptionError } = await supabaseAdmin
+      .from('subscriptions')
+      .select('id, status')
+      .eq('client_id', auth.clientId)
+      .eq('barbershop_id', auth.barbershopId)
+      .in('status', ['pending_activation', 'pending', 'past_due'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (subscriptionError) {
+      throw new Error(subscriptionError.message)
+    }
+
+    if (!subscription) {
+      throw new Error('Nenhuma contratação pendente encontrada')
+    }
+
+    await subscriptionsService.changeStatus(
+      subscription.id,
+      auth.barbershopId,
+      'canceled'
+    )
+
+    const { error: invoiceError } = await supabaseAdmin
+      .from('subscription_invoices')
+      .update({
+        status: 'canceled',
+        payment_url: null,
+        gateway_payload: {
+          source: 'client_portal',
+          action: 'cancel_pending_subscription',
+          reason,
+          canceled_at: new Date().toISOString(),
+        },
+      })
+      .eq('subscription_id', subscription.id)
+      .in('status', ['pending', 'open', 'created', 'authorized'])
+
+    if (invoiceError) {
+      throw new Error(invoiceError.message)
+    }
+
+    return {
+      success: true,
+      message: 'Contratação pendente cancelada com sucesso.',
+    }
+  },  
 }
