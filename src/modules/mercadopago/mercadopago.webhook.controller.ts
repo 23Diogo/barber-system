@@ -59,9 +59,9 @@ function mapMercadoPagoStatusToInvoiceStatus(status: string) {
   const normalized = String(status || '').toLowerCase();
 
   if (normalized === 'approved') return 'paid';
-  if (normalized === 'pending' || normalized === 'in_process' || normalized === 'authorized') return 'pending';
-  if (normalized === 'cancelled' || normalized === 'cancelled_by_user') return 'canceled';
-  if (normalized === 'rejected' || normalized === 'refunded' || normalized === 'charged_back') return 'failed';
+  if (['pending', 'in_process', 'authorized'].includes(normalized)) return 'pending';
+  if (['cancelled', 'cancelled_by_user'].includes(normalized)) return 'canceled';
+  if (['rejected', 'refunded', 'charged_back'].includes(normalized)) return 'failed';
 
   return 'pending';
 }
@@ -97,6 +97,7 @@ export async function mercadoPagoWebhookController(req: Request, res: Response) 
     const externalReference = String(payment.external_reference || '').trim();
 
     if (!externalReference) {
+      console.warn('Webhook Mercado Pago sem external_reference. Ignorando.');
       return res.sendStatus(200);
     }
 
@@ -111,13 +112,16 @@ export async function mercadoPagoWebhookController(req: Request, res: Response) 
 
       if (error) throw new Error(error.message);
 
-      await supabaseAdmin
+      const { error: updateChargeError } = await supabaseAdmin
         .from('subscription_invoices')
         .update({
           external_charge_id: String(payment.id),
+          gateway_payload: payment,
         })
         .eq('external_invoice_id', externalReference)
         .eq('gateway_provider', 'mercado_pago');
+
+      if (updateChargeError) throw new Error(updateChargeError.message);
     } else if (localStatus === 'failed' || localStatus === 'canceled') {
       const { error } = await supabaseAdmin.rpc('mark_subscription_invoice_failed', {
         p_provider: 'mercado_pago',
@@ -128,15 +132,18 @@ export async function mercadoPagoWebhookController(req: Request, res: Response) 
 
       if (error) throw new Error(error.message);
 
-      await supabaseAdmin
+      const { error: updateChargeError } = await supabaseAdmin
         .from('subscription_invoices')
         .update({
           external_charge_id: String(payment.id),
+          gateway_payload: payment,
         })
         .eq('external_invoice_id', externalReference)
         .eq('gateway_provider', 'mercado_pago');
+
+      if (updateChargeError) throw new Error(updateChargeError.message);
     } else {
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from('subscription_invoices')
         .update({
           status: 'pending',
@@ -145,6 +152,8 @@ export async function mercadoPagoWebhookController(req: Request, res: Response) 
         })
         .eq('external_invoice_id', externalReference)
         .eq('gateway_provider', 'mercado_pago');
+
+      if (error) throw new Error(error.message);
     }
 
     console.log('✅ Webhook Mercado Pago processado');
