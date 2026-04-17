@@ -77,3 +77,30 @@ export const cancelPortalAppointment = async (req: Request, res: Response) => {
     res.status(400).json({ error: err.message })
   }
 }
+
+export const listPortalPlans = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.listPlans(req.clientAuth!)
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const getPortalSubscription = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.getSubscription(req.clientAuth!)
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const createPortalSubscriptionCheckout = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.createSubscriptionCheckout(req.clientAuth!, req.body)
+    res.status(201).json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
