@@ -3,6 +3,7 @@ import { ClientAuthPayload } from '../../middleware/client-auth'
 import { appointmentsService } from '../appointments/appointments.service'
 import { subscriptionsService } from '../subscriptions/subscriptions.service'
 import { createMercadoPagoPreference } from '../mercadopago/mercadopago.service'
+import * as bcrypt from 'bcryptjs'
 
 type PortalBarberListInput = {
   serviceId?: string
@@ -51,6 +52,24 @@ function isFutureDate(date: Date) {
 
 function diffHours(from: Date, to: Date) {
   return (to.getTime() - from.getTime()) / (1000 * 60 * 60)
+}
+
+function normalizeDigits(value: any) {
+  return String(value ?? '').replace(/\D/g, '')
+}
+
+async function getClientAccount(auth: ClientAuthPayload) {
+  const { data, error } = await supabaseAdmin
+    .from('client_accounts')
+    .select('id, client_id, barbershop_id, email, whatsapp, password_hash')
+    .eq('client_id', auth.clientId)
+    .eq('barbershop_id', auth.barbershopId)
+    .single()
+
+  if (error) throw new Error(error.message)
+  if (!data) throw new Error('Conta do cliente não encontrada')
+
+  return data
 }
 
 function pickCurrentCycle(subscription: any) {
@@ -1038,4 +1057,116 @@ export const clientPortalService = {
       message: 'Contratação pendente cancelada com sucesso.',
     }
   },  
+  async getProfile(auth: ClientAuthPayload) {
+    const [client, account] = await Promise.all([
+      getClient(auth),
+      getClientAccount(auth),
+    ])
+
+    return {
+      client: {
+        id: client.id,
+        name: client.name || '',
+        whatsapp: client.whatsapp || client.phone || '',
+        email: account.email || client.email || '',
+      },
+      security: {
+        emailLocked: true,
+        emailReason:
+          'Seu e-mail é protegido para preservar a segurança da conta, o histórico e o rastreio do seu cadastro. Se precisar alterar, isso deve acontecer por um fluxo seguro.',
+      },
+    }
+  },
+
+  async updateProfile(auth: ClientAuthPayload, body: any) {
+    const name = normalizeText(body?.name)
+    const whatsapp = normalizeText(body?.whatsapp)
+    const whatsappDigits = normalizeDigits(whatsapp)
+
+    if (!name) {
+      throw new Error('Informe seu nome.')
+    }
+
+    if (!whatsapp) {
+      throw new Error('Informe seu telefone/WhatsApp.')
+    }
+
+    if (whatsappDigits.length < 10) {
+      throw new Error('Informe um telefone/WhatsApp válido.')
+    }
+
+    const { error: clientError } = await supabaseAdmin
+      .from('clients')
+      .update({
+        name,
+        whatsapp,
+        phone: whatsapp,
+      })
+      .eq('id', auth.clientId)
+      .eq('barbershop_id', auth.barbershopId)
+
+    if (clientError) throw new Error(clientError.message)
+
+    const { error: accountError } = await supabaseAdmin
+      .from('client_accounts')
+      .update({
+        whatsapp,
+      })
+      .eq('client_id', auth.clientId)
+      .eq('barbershop_id', auth.barbershopId)
+
+    if (accountError) throw new Error(accountError.message)
+
+    return this.getProfile(auth)
+  },
+
+  async changePassword(auth: ClientAuthPayload, body: any) {
+    const currentPassword = String(body?.currentPassword || '')
+    const newPassword = String(body?.newPassword || '')
+    const confirmPassword = String(body?.confirmPassword || '')
+
+    if (!currentPassword) {
+      throw new Error('Informe sua senha atual.')
+    }
+
+    if (!newPassword) {
+      throw new Error('Informe a nova senha.')
+    }
+
+    if (newPassword.length < 6) {
+      throw new Error('A nova senha deve ter pelo menos 6 caracteres.')
+    }
+
+    if (newPassword !== confirmPassword) {
+      throw new Error('A confirmação da nova senha não confere.')
+    }
+
+    const account = await getClientAccount(auth)
+
+    if (!account.password_hash) {
+      throw new Error('Não foi possível validar sua senha atual.')
+    }
+
+    const matches = await bcrypt.compare(currentPassword, account.password_hash)
+
+    if (!matches) {
+      throw new Error('Sua senha atual está incorreta.')
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+
+    const { error } = await supabaseAdmin
+      .from('client_accounts')
+      .update({
+        password_hash: passwordHash,
+      })
+      .eq('id', account.id)
+
+    if (error) throw new Error(error.message)
+
+    return {
+      success: true,
+      message: 'Senha alterada com sucesso.',
+    }
+  },
 }
