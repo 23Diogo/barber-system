@@ -104,3 +104,12 @@ export const createPortalSubscriptionCheckout = async (req: Request, res: Respon
     res.status(400).json({ error: err.message })
   }
 }
+
+export const cancelPortalPendingSubscription = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.cancelPendingSubscription(req.clientAuth!, req.body)
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
