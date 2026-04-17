@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../../config/supabase'
 import { ClientAuthPayload } from '../../middleware/client-auth'
 import { appointmentsService } from '../appointments/appointments.service'
 import { subscriptionsService } from '../subscriptions/subscriptions.service'
+import { createMercadoPagoPreference } from '../mercadopago/mercadopago.service'
 
 type PortalBarberListInput = {
   serviceId?: string
@@ -870,13 +871,17 @@ export const clientPortalService = {
     }
   },
 
-  async createSubscriptionCheckout(auth: ClientAuthPayload, body: any) {
+    async createSubscriptionCheckout(auth: ClientAuthPayload, body: any) {
     const planId = normalizeText(body?.planId)
     if (!planId) {
       throw new Error('planId é obrigatório')
     }
 
-    const barbershop = await getBarbershopSettings(auth.barbershopId)
+    const [barbershop, client] = await Promise.all([
+      getBarbershopSettings(auth.barbershopId),
+      getClient(auth),
+    ])
+
     if (!barbershop.is_active) {
       throw new Error(barbershop.absence_message || 'Barbearia indisponível no momento')
     }
@@ -892,7 +897,7 @@ export const clientPortalService = {
 
     const { data: plan, error: planError } = await supabaseAdmin
       .from('plans')
-      .select('id, name, is_active')
+      .select('id, name, is_active, price, price_cents, currency')
       .eq('id', planId)
       .eq('barbershop_id', auth.barbershopId)
       .eq('is_active', true)
@@ -922,14 +927,63 @@ export const clientPortalService = {
     const currentCycle = pickCurrentCycle(subscription)
     const latestInvoice = pickLatestInvoice(subscription)
 
+    if (!latestInvoice?.id) {
+      throw new Error('Não foi possível localizar a cobrança inicial da assinatura')
+    }
+
+    const preference = await createMercadoPagoPreference({
+      title: `${plan.name} - ${barbershop.name}`,
+      quantity: 1,
+      unitPrice: Number(latestInvoice.amount_cents || plan.price_cents || 0) / 100,
+      externalReference: latestInvoice.id,
+      payerEmail: client.email || undefined,
+      metadata: {
+        source: 'client_portal_subscription',
+        invoiceId: latestInvoice.id,
+        subscriptionId: subscription.id,
+        clientId: auth.clientId,
+        barbershopId: auth.barbershopId,
+        planId: plan.id,
+      },
+    })
+
+    const checkoutUrl =
+      preference.sandbox_init_point ||
+      preference.init_point ||
+      null
+
+    const { error: invoiceUpdateError } = await supabaseAdmin
+      .from('subscription_invoices')
+      .update({
+        gateway_provider: 'mercado_pago',
+        external_invoice_id: latestInvoice.id,
+        payment_url: checkoutUrl,
+      })
+      .eq('id', latestInvoice.id)
+      .eq('subscription_id', subscription.id)
+
+    if (invoiceUpdateError) {
+      throw new Error(invoiceUpdateError.message)
+    }
+
+    const refreshedSubscription = await subscriptionsService.getActiveByClient(
+      auth.clientId,
+      auth.barbershopId
+    )
+
+    const refreshedLatestInvoice = pickLatestInvoice(refreshedSubscription)
+
     return {
-      subscription,
-      currentCycle,
-      latestInvoice,
+      subscription: refreshedSubscription,
+      currentCycle: pickCurrentCycle(refreshedSubscription),
+      latestInvoice: refreshedLatestInvoice,
       checkout: {
-        paymentUrl: latestInvoice?.payment_url || null,
-        invoiceId: latestInvoice?.id || null,
-        status: latestInvoice?.status || null,
+        preferenceId: preference.id,
+        initPoint: preference.init_point || null,
+        sandboxInitPoint: preference.sandbox_init_point || null,
+        paymentUrl: refreshedLatestInvoice?.payment_url || checkoutUrl,
+        invoiceId: refreshedLatestInvoice?.id || latestInvoice.id,
+        status: refreshedLatestInvoice?.status || latestInvoice.status || 'pending',
       },
     }
   },
