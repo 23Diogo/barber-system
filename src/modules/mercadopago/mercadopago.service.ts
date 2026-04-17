@@ -5,13 +5,29 @@ type CreatePreferenceInput = {
   quantity: number;
   unitPrice: number;
   externalReference?: string;
+  payerEmail?: string;
+  successUrl?: string;
+  failureUrl?: string;
+  pendingUrl?: string;
+  metadata?: Record<string, any>;
 };
+
+function buildFrontUrl(path: string) {
+  const base = String(mercadoPagoConfig.frontendUrl || '').replace(/\/$/, '');
+  const suffix = String(path || '').startsWith('/') ? path : `/${path}`;
+  return `${base}${suffix}`;
+}
 
 export async function createMercadoPagoPreference({
   title,
   quantity,
   unitPrice,
   externalReference,
+  payerEmail,
+  successUrl,
+  failureUrl,
+  pendingUrl,
+  metadata,
 }: CreatePreferenceInput) {
   const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
@@ -29,10 +45,12 @@ export async function createMercadoPagoPreference({
         },
       ],
       external_reference: externalReference || undefined,
+      payer: payerEmail ? { email: payerEmail } : undefined,
+      metadata: metadata || undefined,
       back_urls: {
-        success: `${mercadoPagoConfig.frontendUrl}/success.html`,
-        failure: `${mercadoPagoConfig.frontendUrl}/failure.html`,
-        pending: `${mercadoPagoConfig.frontendUrl}/pending.html`,
+        success: successUrl || buildFrontUrl('/client/assinatura/'),
+        failure: failureUrl || buildFrontUrl('/client/assinatura/'),
+        pending: pendingUrl || buildFrontUrl('/client/assinatura/'),
       },
       auto_return: 'approved',
     }),
