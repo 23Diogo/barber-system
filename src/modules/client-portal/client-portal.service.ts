@@ -307,6 +307,20 @@ async function validateBarberServiceRelation(barberId: string, serviceId: string
   }
 }
 
+function pickLatestInvoice(subscription: any) {
+  const invoices = Array.isArray(subscription?.subscription_invoices)
+    ? [...subscription.subscription_invoices]
+    : []
+
+  if (!invoices.length) return null
+
+  return invoices.sort((a: any, b: any) => {
+    const aTime = new Date(a?.due_at || a?.created_at || 0).getTime()
+    const bTime = new Date(b?.due_at || b?.created_at || 0).getTime()
+    return bTime - aTime
+  })[0] || null
+}
+
 function validateBookingWindow(barbershop: any, scheduledAt: Date) {
   if (!isFutureDate(scheduledAt)) {
     throw new Error('Escolha um horário futuro')
