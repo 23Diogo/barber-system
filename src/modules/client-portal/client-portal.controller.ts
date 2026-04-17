@@ -113,3 +113,30 @@ export const cancelPortalPendingSubscription = async (req: Request, res: Respons
     res.status(400).json({ error: err.message })
   }
 }
+
+export const getPortalProfile = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.getProfile(req.clientAuth!)
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const updatePortalProfile = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.updateProfile(req.clientAuth!, req.body)
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+export const changePortalPassword = async (req: Request, res: Response) => {
+  try {
+    const data = await clientPortalService.changePassword(req.clientAuth!, req.body)
+    res.json(data)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
