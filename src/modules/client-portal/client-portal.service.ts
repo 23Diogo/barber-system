@@ -815,4 +815,123 @@ export const clientPortalService = {
 
     return data
   },
+  async listPlans(auth: ClientAuthPayload) {
+    const activeSubscription = await subscriptionsService.getActiveByClient(
+      auth.clientId,
+      auth.barbershopId
+    )
+
+    const { data, error } = await supabaseAdmin
+      .from('plans')
+      .select(`
+        *,
+        plan_service_entitlements(*, services(id, name))
+      `)
+      .eq('barbershop_id', auth.barbershopId)
+      .eq('is_active', true)
+      .order('price_cents', { ascending: true })
+
+    if (error) throw new Error(error.message)
+
+    return {
+      items: (data || []).map((plan: any) => ({
+        ...plan,
+        isCurrentPlan: activeSubscription?.plan_id === plan.id,
+      })),
+      activeSubscription: activeSubscription
+        ? {
+            id: activeSubscription.id,
+            status: activeSubscription.status,
+            planId: activeSubscription.plan_id,
+            planName: activeSubscription.plans?.name || null,
+          }
+        : null,
+    }
+  },
+
+  async getSubscription(auth: ClientAuthPayload) {
+    const subscription = await subscriptionsService.getActiveByClient(
+      auth.clientId,
+      auth.barbershopId
+    )
+
+    if (!subscription) {
+      return {
+        subscription: null,
+        currentCycle: null,
+        latestInvoice: null,
+      }
+    }
+
+    return {
+      subscription,
+      currentCycle: pickCurrentCycle(subscription),
+      latestInvoice: pickLatestInvoice(subscription),
+    }
+  },
+
+  async createSubscriptionCheckout(auth: ClientAuthPayload, body: any) {
+    const planId = normalizeText(body?.planId)
+    if (!planId) {
+      throw new Error('planId é obrigatório')
+    }
+
+    const barbershop = await getBarbershopSettings(auth.barbershopId)
+    if (!barbershop.is_active) {
+      throw new Error(barbershop.absence_message || 'Barbearia indisponível no momento')
+    }
+
+    const existingSubscription = await subscriptionsService.getActiveByClient(
+      auth.clientId,
+      auth.barbershopId
+    )
+
+    if (existingSubscription) {
+      throw new Error('Você já possui um plano ativo ou pendente nesta barbearia')
+    }
+
+    const { data: plan, error: planError } = await supabaseAdmin
+      .from('plans')
+      .select('id, name, is_active')
+      .eq('id', planId)
+      .eq('barbershop_id', auth.barbershopId)
+      .eq('is_active', true)
+      .single()
+
+    if (planError || !plan) {
+      throw new Error('Plano não encontrado')
+    }
+
+    await subscriptionsService.create(auth.barbershopId, {
+      client_id: auth.clientId,
+      plan_id: planId,
+      gateway_provider: 'mercado_pago',
+      payment_method: 'checkout_pro',
+      due_at: new Date().toISOString(),
+    })
+
+    const subscription = await subscriptionsService.getActiveByClient(
+      auth.clientId,
+      auth.barbershopId
+    )
+
+    if (!subscription) {
+      throw new Error('Não foi possível criar a assinatura')
+    }
+
+    const currentCycle = pickCurrentCycle(subscription)
+    const latestInvoice = pickLatestInvoice(subscription)
+
+    return {
+      subscription,
+      currentCycle,
+      latestInvoice,
+      checkout: {
+        paymentUrl: latestInvoice?.payment_url || null,
+        invoiceId: latestInvoice?.id || null,
+        status: latestInvoice?.status || null,
+      },
+    }
+  },
+  
 }
