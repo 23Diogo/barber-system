@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { Request, Response } from 'express';
+import { supabaseAdmin } from '../../config/supabase';
 import { mercadoPagoConfig } from '../../config/mercadopago';
 import { getMercadoPagoPayment } from './mercadopago.service';
 
@@ -93,32 +94,69 @@ export async function mercadoPagoWebhookController(req: Request, res: Response) 
 
     const payment = await getMercadoPagoPayment(dataId);
     const localStatus = mapMercadoPagoStatusToInvoiceStatus(payment.status);
+    const externalReference = String(payment.external_reference || '').trim();
 
-    console.log('✅ Webhook Mercado Pago validado');
+    if (!externalReference) {
+      return res.sendStatus(200);
+    }
+
+    if (localStatus === 'paid') {
+      const { error } = await supabaseAdmin.rpc('mark_subscription_invoice_paid', {
+        p_provider: 'mercado_pago',
+        p_external_invoice_id: externalReference,
+        p_paid_at: payment.date_approved || new Date().toISOString(),
+        p_payment_url: null,
+        p_gateway_payload: payment,
+      });
+
+      if (error) throw new Error(error.message);
+
+      await supabaseAdmin
+        .from('subscription_invoices')
+        .update({
+          external_charge_id: String(payment.id),
+        })
+        .eq('external_invoice_id', externalReference)
+        .eq('gateway_provider', 'mercado_pago');
+    } else if (localStatus === 'failed' || localStatus === 'canceled') {
+      const { error } = await supabaseAdmin.rpc('mark_subscription_invoice_failed', {
+        p_provider: 'mercado_pago',
+        p_external_invoice_id: externalReference,
+        p_failure_reason: payment.status_detail || payment.status || 'payment_failed',
+        p_gateway_payload: payment,
+      });
+
+      if (error) throw new Error(error.message);
+
+      await supabaseAdmin
+        .from('subscription_invoices')
+        .update({
+          external_charge_id: String(payment.id),
+        })
+        .eq('external_invoice_id', externalReference)
+        .eq('gateway_provider', 'mercado_pago');
+    } else {
+      await supabaseAdmin
+        .from('subscription_invoices')
+        .update({
+          status: 'pending',
+          external_charge_id: String(payment.id),
+          gateway_payload: payment,
+        })
+        .eq('external_invoice_id', externalReference)
+        .eq('gateway_provider', 'mercado_pago');
+    }
+
+    console.log('✅ Webhook Mercado Pago processado');
     console.log({
       notificationType: type,
       paymentId: payment.id,
-      externalReference: payment.external_reference,
+      externalReference,
       mercadoPagoStatus: payment.status,
       localStatus,
       transactionAmount: payment.transaction_amount,
       payerEmail: payment.payer?.email,
     });
-
-    /**
-     * PRÓXIMO PASSO DA PERSISTÊNCIA:
-     * Aqui você vai localizar sua cobrança local usando:
-     *   payment.external_reference
-     * e atualizar o status no banco.
-     *
-     * Exemplo do que deve existir no seu módulo de payments:
-     *   await syncInvoiceByGatewayReference(payment.external_reference, {
-     *     gateway_status: payment.status,
-     *     local_status: localStatus,
-     *     payment_id: String(payment.id),
-     *     paid_at: payment.date_approved || null,
-     *   });
-     */
 
     return res.sendStatus(200);
   } catch (error) {
