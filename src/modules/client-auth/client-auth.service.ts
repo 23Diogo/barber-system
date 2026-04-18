@@ -9,15 +9,18 @@ type RegisterClientInput = {
   whatsapp?: string | null
   email?: string | null
   password: string
+  barbershopSlug: string
 }
 
 type LoginClientInput = {
   identifier: string
   password: string
+  barbershopSlug: string
 }
 
 type ForgotPasswordInput = {
   identifier: string
+  barbershopSlug: string
 }
 
 type ResetPasswordInput = {
@@ -25,11 +28,7 @@ type ResetPasswordInput = {
   newPassword: string
 }
 
-function getPortalBarbershopId() {
-  const value = process.env.CLIENT_PORTAL_BARBERSHOP_ID?.trim()
-  if (!value) throw new Error('CLIENT_PORTAL_BARBERSHOP_ID não configurado')
-  return value
-}
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function normalizeEmail(value?: string | null) {
   const email = String(value || '').trim().toLowerCase()
@@ -52,6 +51,34 @@ function signClientToken(payload: ClientAuthPayload) {
 function hashResetToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
+
+// ─── Busca barbearia pelo slug ───────────────────────────────────────────────
+
+async function getBarbershopBySlug(slug: string) {
+  const normalizedSlug = String(slug || '').trim().toLowerCase()
+
+  if (!normalizedSlug) {
+    throw new Error('Slug da barbearia não informado')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('barbershops')
+    .select('id, name, slug, is_active')
+    .eq('slug', normalizedSlug)
+    .single()
+
+  if (error || !data) {
+    throw new Error('Barbearia não encontrada')
+  }
+
+  if (!data.is_active) {
+    throw new Error('Barbearia indisponível no momento')
+  }
+
+  return data
+}
+
+// ─── Queries internas ────────────────────────────────────────────────────────
 
 async function findClientByEmail(barbershopId: string, email: string) {
   const { data, error } = await supabaseAdmin
@@ -87,7 +114,11 @@ async function findClientByWhatsapp(barbershopId: string, whatsapp: string) {
   return byPhone.data?.[0] || null
 }
 
-async function findExistingClient(barbershopId: string, email: string | null, whatsapp: string | null) {
+async function findExistingClient(
+  barbershopId: string,
+  email: string | null,
+  whatsapp: string | null
+) {
   if (email) {
     const clientByEmail = await findClientByEmail(barbershopId, email)
     if (clientByEmail) return clientByEmail
@@ -137,7 +168,9 @@ async function findAccountByIdentifier(barbershopId: string, identifier: string)
 async function getClientById(clientId: string, barbershopId: string) {
   const { data, error } = await supabaseAdmin
     .from('clients')
-    .select('id, barbershop_id, name, email, phone, whatsapp, notes, is_active, is_vip, created_at, updated_at')
+    .select(
+      'id, barbershop_id, name, email, phone, whatsapp, notes, is_active, is_vip, created_at, updated_at'
+    )
     .eq('id', clientId)
     .eq('barbershop_id', barbershopId)
     .single()
@@ -146,9 +179,13 @@ async function getClientById(clientId: string, barbershopId: string) {
   return data
 }
 
+// ─── Service ─────────────────────────────────────────────────────────────────
+
 export const clientAuthService = {
   async register(input: RegisterClientInput) {
-    const barbershopId = getPortalBarbershopId()
+    const barbershop = await getBarbershopBySlug(input.barbershopSlug)
+    const barbershopId = barbershop.id
+
     const name = String(input.name || '').trim()
     const email = normalizeEmail(input.email)
     const whatsapp = normalizeWhatsapp(input.whatsapp)
@@ -248,12 +285,15 @@ export const clientAuthService = {
         phone: client.phone,
         whatsapp: client.whatsapp,
         barbershopId,
+        barbershopSlug: barbershop.slug,
       },
     }
   },
 
   async login(input: LoginClientInput) {
-    const barbershopId = getPortalBarbershopId()
+    const barbershop = await getBarbershopBySlug(input.barbershopSlug)
+    const barbershopId = barbershop.id
+
     const identifier = String(input.identifier || '').trim()
     const password = String(input.password || '')
 
@@ -276,7 +316,7 @@ export const clientAuthService = {
       throw new Error('Conta indisponível')
     }
 
-    const { error: updateError } = await supabaseAdmin
+    await supabaseAdmin
       .from('client_accounts')
       .update({
         last_login_at: new Date().toISOString(),
@@ -284,8 +324,6 @@ export const clientAuthService = {
       })
       .eq('id', account.id)
       .eq('barbershop_id', barbershopId)
-
-    if (updateError) throw new Error(updateError.message)
 
     const token = signClientToken({
       clientId: client.id,
@@ -303,6 +341,7 @@ export const clientAuthService = {
         phone: client.phone,
         whatsapp: client.whatsapp,
         barbershopId,
+        barbershopSlug: barbershop.slug,
       },
     }
   },
@@ -310,7 +349,9 @@ export const clientAuthService = {
   async me(auth: ClientAuthPayload) {
     const { data: account, error: accountError } = await supabaseAdmin
       .from('client_accounts')
-      .select('id, client_id, barbershop_id, email, whatsapp, is_active, last_login_at, created_at')
+      .select(
+        'id, client_id, barbershop_id, email, whatsapp, is_active, last_login_at, created_at'
+      )
       .eq('id', auth.clientAccountId)
       .eq('client_id', auth.clientId)
       .eq('barbershop_id', auth.barbershopId)
@@ -338,10 +379,21 @@ export const clientAuthService = {
   },
 
   async forgotPassword(input: ForgotPasswordInput) {
-    const barbershopId = getPortalBarbershopId()
     const identifier = String(input.identifier || '').trim()
 
     if (!identifier) {
+      return {
+        ok: true,
+        message: 'Se os dados estiverem corretos, você receberá instruções para redefinir sua senha.',
+      }
+    }
+
+    let barbershopId: string | null = null
+
+    try {
+      const barbershop = await getBarbershopBySlug(input.barbershopSlug)
+      barbershopId = barbershop.id
+    } catch {
       return {
         ok: true,
         message: 'Se os dados estiverem corretos, você receberá instruções para redefinir sua senha.',
@@ -359,7 +411,6 @@ export const clientAuthService = {
 
     const rawToken = crypto.randomBytes(32).toString('hex')
     const tokenHash = hashResetToken(rawToken)
-
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString()
 
     const { error } = await supabaseAdmin
@@ -421,9 +472,7 @@ export const clientAuthService = {
 
     const { error: markUsedError } = await supabaseAdmin
       .from('client_password_reset_tokens')
-      .update({
-        used_at: new Date().toISOString(),
-      })
+      .update({ used_at: new Date().toISOString() })
       .eq('id', tokenRow.id)
 
     if (markUsedError) throw new Error(markUsedError.message)
