@@ -388,7 +388,7 @@ export const clientAuthService = {
       }
     }
 
-    let barbershopId: string | null = null
+    let barbershopId: string
 
     try {
       const barbershop = await getBarbershopBySlug(input.barbershopSlug)
