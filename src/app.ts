@@ -27,6 +27,7 @@ import mercadoPagoRoutes from './modules/mercadopago/mercadopago.routes'
 import { startLicenseCheckJob } from './jobs/checkLicenses'
 import { startReminderJob } from './jobs/sendReminders'
 import { startReactivationJob } from './jobs/reactivation'
+import reviewsRoutes from './modules/reviews/reviews.routes'
 
 const app = express()
 const PORT = process.env.PORT || 3333
@@ -80,6 +81,7 @@ app.use('/api/plans', plansRoutes)
 app.use('/api/subscriptions', subscriptionsRoutes)
 app.use('/api/payments', paymentsRoutes)
 app.use('/api/mercadopago', mercadoPagoRoutes)
+app.use('/api/reviews', reviewsRoutes)
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('❌', err.message)
