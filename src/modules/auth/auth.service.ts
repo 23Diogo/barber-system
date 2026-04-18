@@ -1,17 +1,40 @@
 import jwt from 'jsonwebtoken'
+import bcrypt from 'bcryptjs'
 import { supabaseAdmin } from '../../config/supabase'
 import { AuthPayload } from '../../middleware/auth'
 
 export const authService = {
-  async register(data: { barbershopName: string; ownerName: string; email: string; phone: string }) {
+  async register(data: {
+    barbershopName: string
+    ownerName: string
+    email: string
+    phone: string
+    password: string
+  }) {
     const trialEnd = new Date()
     trialEnd.setDate(trialEnd.getDate() + 14)
 
     const normalizedEmail = data.email.trim().toLowerCase()
 
-    const slug = data.barbershopName.toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    // Verifica se e-mail já existe
+    const { data: existing } = await supabaseAdmin
+      .from('users')
+      .select('id')
+      .ilike('email', normalizedEmail)
+      .maybeSingle()
+
+    if (existing) {
+      throw new Error('Este e-mail já está cadastrado.')
+    }
+
+    const slug = data.barbershopName
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-]/g, '')
+
+    const passwordHash = await bcrypt.hash(data.password, 10)
 
     const { data: shop, error: shopErr } = await supabaseAdmin
       .from('barbershops')
@@ -23,7 +46,7 @@ export const authService = {
         phone: data.phone,
         plan_status: 'trial',
         trial_ends_at: trialEnd.toISOString(),
-        is_active: true
+        is_active: true,
       })
       .select()
       .single()
@@ -40,7 +63,8 @@ export const authService = {
         name: data.ownerName,
         email: normalizedEmail,
         phone: data.phone,
-        role: 'owner'
+        role: 'owner',
+        password_hash: passwordHash,
       })
       .select()
       .single()
@@ -59,44 +83,40 @@ export const authService = {
     return { token, user, barbershop: shop }
   },
 
-  async login(email: string) {
+  async login(email: string, password: string) {
     const normalizedEmail = email.trim().toLowerCase()
-    console.log('AUTH login attempt:', normalizedEmail)
-
-    const { data: shop, error: shopErr } = await supabaseAdmin
-      .from('barbershops')
-      .select('id, name, is_active, plan_status, email')
-      .ilike('email', normalizedEmail)
-      .maybeSingle()
-
-    if (shopErr) {
-      console.error('AUTH login shop error:', shopErr)
-      throw new Error(`Erro ao buscar barbearia: ${shopErr.message}`)
-    }
-
-    console.log('AUTH login shop result:', shop)
-
-    if (!shop) {
-      throw new Error('Credenciais inválidas')
-    }
 
     const { data: user, error: userErr } = await supabaseAdmin
       .from('users')
-      .select('*')
-      .eq('barbershop_id', shop.id)
+      .select('*, barbershops(*)')
       .ilike('email', normalizedEmail)
       .eq('is_active', true)
       .maybeSingle()
 
     if (userErr) {
       console.error('AUTH login user error:', userErr)
-      throw new Error(`Erro ao buscar usuário: ${userErr.message}`)
+      throw new Error('Erro ao buscar usuário.')
     }
 
-    console.log('AUTH login user result:', user)
-
     if (!user) {
-      throw new Error('Credenciais inválidas')
+      throw new Error('E-mail ou senha incorretos.')
+    }
+
+    // Usuários sem senha (migração) — bloqueia e pede redefinição
+    if (!user.password_hash) {
+      throw new Error('Conta sem senha definida. Entre em contato com o suporte.')
+    }
+
+    const passwordMatch = await bcrypt.compare(password, user.password_hash)
+
+    if (!passwordMatch) {
+      throw new Error('E-mail ou senha incorretos.')
+    }
+
+    const shop = user.barbershops
+
+    if (!shop?.is_active) {
+      throw new Error('Barbearia inativa. Entre em contato com o suporte.')
     }
 
     const token = jwt.sign(
@@ -105,6 +125,20 @@ export const authService = {
       { expiresIn: '7d' }
     )
 
-    return { token, user, barbershop: shop }
-  }
+    return {
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+      barbershop: {
+        id: shop.id,
+        name: shop.name,
+        slug: shop.slug,
+        plan_status: shop.plan_status,
+      },
+    }
+  },
 }
