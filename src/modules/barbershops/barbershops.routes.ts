@@ -1,51 +1,68 @@
-import { Router } from 'express'
-import { Request, Response } from 'express'
-import { authenticate } from '../../middleware/auth'
+import { Router, Request, Response } from 'express'
 import { supabaseAdmin } from '../../config/supabase'
+import { authenticate } from '../../middleware/auth'
 
-const getMe = async (req: Request, res: Response) => {
+const router = Router()
+router.use(authenticate)
+
+// GET /api/barbershops/me — dados completos da barbearia (já usado em /api/auth/me mas útil separado)
+router.get('/me', async (req: Request, res: Response) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('barbershops')
-      .select('*, plans(*)')
+      .select('*')
       .eq('id', req.user!.barbershopId)
       .single()
+
     if (error) throw error
     res.json(data)
-  } catch (err: any) { res.status(400).json({ error: err.message }) }
-}
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+})
 
-const updateMe = async (req: Request, res: Response) => {
+// PATCH /api/barbershops/settings — salva notification_settings e outros campos configuráveis
+router.patch('/settings', async (req: Request, res: Response) => {
   try {
+    const allowed = [
+      'notification_settings',
+      'absence_message',
+      'working_hours',
+      'booking_advance_days',
+      'cancellation_hours',
+      'name',
+      'phone',
+      'whatsapp',
+      'address',
+      'city',
+      'state',
+      'zip_code',
+    ]
+
+    // Filtra apenas campos permitidos
+    const payload: Record<string, any> = {}
+    for (const key of allowed) {
+      if (key in req.body) payload[key] = req.body[key]
+    }
+
+    if (!Object.keys(payload).length) {
+      return res.status(400).json({ error: 'Nenhum campo válido enviado.' })
+    }
+
+    payload.updated_at = new Date().toISOString()
+
     const { data, error } = await supabaseAdmin
       .from('barbershops')
-      .update(req.body)
+      .update(payload)
       .eq('id', req.user!.barbershopId)
       .select()
       .single()
+
     if (error) throw error
     res.json(data)
-  } catch (err: any) { res.status(400).json({ error: err.message }) }
-}
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+})
 
-const getPublic = async (req: Request, res: Response) => {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('barbershops')
-      .select('id, name, slug, logo_url, cover_url, address, city, working_hours, is_active, absence_message')
-      .eq('slug', req.params.slug)
-      .single()
-    if (error) throw error
-    if (!data.is_active) {
-      return res.json({ is_active: false, absence_message: data.absence_message })
-    }
-    res.json(data)
-  } catch (err: any) { res.status(404).json({ error: 'Barbearia não encontrada' }) }
-}
-
-const router = Router()
-router.get('/public/:slug', getPublic)          // rota pública para o bot/link de agendamento
-router.use(authenticate)
-router.get('/me',   getMe)
-router.patch('/me', updateMe)
 export default router
