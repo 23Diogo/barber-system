@@ -32,7 +32,24 @@ const app = express()
 const PORT = process.env.PORT || 3333
 
 app.use(helmet())
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }))
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://bbarberflow.com.br',
+  'https://www.bbarberflow.com.br',
+  'https://app.bbarberflow.com.br',
+  'https://barber-system-front.diogo-camarg.workers.dev',
+].filter(Boolean) as string[]
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      callback(new Error(`CORS bloqueado para origem: ${origin}`))
+    }
+  },
+  credentials: true,
+}))
 app.use(morgan('dev'))
 
 app.use('/api/whatsapp/webhook', express.raw({ type: '*/*' }))
