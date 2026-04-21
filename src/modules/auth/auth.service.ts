@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { supabaseAdmin } from '../../config/supabase'
 import { AuthPayload } from '../../middleware/auth'
+import { sendWelcomeOwner } from '../../services/email.service'
 
 export const authService = {
   async register(data: {
@@ -13,19 +14,15 @@ export const authService = {
   }) {
     const trialEnd = new Date()
     trialEnd.setDate(trialEnd.getDate() + 14)
-
     const normalizedEmail = data.email.trim().toLowerCase()
 
-    // Verifica se e-mail já existe
     const { data: existing } = await supabaseAdmin
       .from('users')
       .select('id')
       .ilike('email', normalizedEmail)
       .maybeSingle()
 
-    if (existing) {
-      throw new Error('Este e-mail já está cadastrado.')
-    }
+    if (existing) throw new Error('Este e-mail já está cadastrado.')
 
     const slug = data.barbershopName
       .toLowerCase()
@@ -39,46 +36,49 @@ export const authService = {
     const { data: shop, error: shopErr } = await supabaseAdmin
       .from('barbershops')
       .insert({
-        name: data.barbershopName,
+        name:           data.barbershopName,
         slug,
-        owner_name: data.ownerName,
-        email: normalizedEmail,
-        phone: data.phone,
-        plan_status: 'trial',
-        trial_ends_at: trialEnd.toISOString(),
-        is_active: true,
+        owner_name:     data.ownerName,
+        email:          normalizedEmail,
+        phone:          data.phone,
+        plan_status:    'trial',
+        trial_ends_at:  trialEnd.toISOString(),
+        is_active:      true,
       })
       .select()
       .single()
 
-    if (shopErr) {
-      console.error('AUTH register shop error:', shopErr)
-      throw new Error(shopErr.message)
-    }
+    if (shopErr) throw new Error(shopErr.message)
 
     const { data: user, error: userErr } = await supabaseAdmin
       .from('users')
       .insert({
         barbershop_id: shop.id,
-        name: data.ownerName,
-        email: normalizedEmail,
-        phone: data.phone,
-        role: 'owner',
+        name:          data.ownerName,
+        email:         normalizedEmail,
+        phone:         data.phone,
+        role:          'owner',
         password_hash: passwordHash,
       })
       .select()
       .single()
 
-    if (userErr) {
-      console.error('AUTH register user error:', userErr)
-      throw new Error(userErr.message)
-    }
+    if (userErr) throw new Error(userErr.message)
 
     const token = jwt.sign(
       { userId: user.id, barbershopId: shop.id, role: 'owner' } as AuthPayload,
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
     )
+
+    // E-mail de boas-vindas — não bloqueia o cadastro se falhar
+    setImmediate(() => {
+      sendWelcomeOwner({
+        email:     normalizedEmail,
+        ownerName: data.ownerName,
+        shopName:  data.barbershopName,
+      }).catch(err => console.error('❌ [email] sendWelcomeOwner:', err?.message))
+    })
 
     return { token, user, barbershop: shop }
   },
@@ -93,31 +93,18 @@ export const authService = {
       .eq('is_active', true)
       .maybeSingle()
 
-    if (userErr) {
-      console.error('AUTH login user error:', userErr)
-      throw new Error('Erro ao buscar usuário.')
-    }
+    if (userErr) throw new Error('Erro ao buscar usuário.')
+    if (!user)   throw new Error('E-mail ou senha incorretos.')
 
-    if (!user) {
-      throw new Error('E-mail ou senha incorretos.')
-    }
-
-    // Usuários sem senha (migração) — bloqueia e pede redefinição
     if (!user.password_hash) {
       throw new Error('Conta sem senha definida. Entre em contato com o suporte.')
     }
 
     const passwordMatch = await bcrypt.compare(password, user.password_hash)
-
-    if (!passwordMatch) {
-      throw new Error('E-mail ou senha incorretos.')
-    }
+    if (!passwordMatch) throw new Error('E-mail ou senha incorretos.')
 
     const shop = user.barbershops
-
-    if (!shop?.is_active) {
-      throw new Error('Barbearia inativa. Entre em contato com o suporte.')
-    }
+    if (!shop?.is_active) throw new Error('Barbearia inativa. Entre em contato com o suporte.')
 
     const token = jwt.sign(
       { userId: user.id, barbershopId: shop.id, role: user.role } as AuthPayload,
@@ -127,18 +114,8 @@ export const authService = {
 
     return {
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      barbershop: {
-        id: shop.id,
-        name: shop.name,
-        slug: shop.slug,
-        plan_status: shop.plan_status,
-      },
+      user:      { id: user.id, name: user.name, email: user.email, role: user.role },
+      barbershop: { id: shop.id, name: shop.name, slug: shop.slug, plan_status: shop.plan_status },
     }
   },
 }
