@@ -64,8 +64,8 @@ app.use(morgan('dev'))
 // Webhook do WhatsApp precisa do body raw ANTES do express.json()
 app.use('/api/whatsapp/webhook', express.raw({ type: '*/*' }))
 
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+app.use(express.json({ limit: '10mb' }))
+app.use(express.urlencoded({ limit: '10mb', extended: true }))
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_, res) =>
