@@ -4,6 +4,7 @@ import * as bcrypt from 'bcryptjs'
 import { supabaseAdmin } from '../../config/supabase'
 import { ClientAuthPayload } from '../../middleware/client-auth'
 import { sendWelcomeClient, sendPasswordResetClient } from '../../services/email.service'
+import { whatsappService } from '../whatsapp/whatsapp.service'
 
 type RegisterClientInput = {
   name: string
@@ -88,7 +89,6 @@ async function findAccountByWhatsapp(barbershopId: string, whatsapp: string) {
   return data?.[0] || null
 }
 
-// Busca account em QUALQUER barbearia pelo e-mail (para multi-barbearia)
 async function findAccountByEmailGlobal(email: string) {
   const { data, error } = await supabaseAdmin
     .from('client_accounts').select('*')
@@ -97,7 +97,6 @@ async function findAccountByEmailGlobal(email: string) {
   return data?.[0] || null
 }
 
-// Busca account em QUALQUER barbearia pelo whatsapp (para multi-barbearia)
 async function findAccountByWhatsappGlobal(whatsapp: string) {
   const { data, error } = await supabaseAdmin
     .from('client_accounts').select('*')
@@ -162,6 +161,19 @@ async function getClientById(clientId: string, barbershopId: string) {
   return data
 }
 
+// ─── Helper: dispara WhatsApp de boas-vindas de forma assíncrona ───────────────
+
+function fireWelcomeWhatsApp(barbershopId: string, clientName: string, clientWhatsapp: string | null) {
+  if (!clientWhatsapp) return
+  setImmediate(() => {
+    whatsappService.sendClientWelcome({
+      barbershopId,
+      clientName,
+      clientWhatsapp,
+    }).catch(err => console.error('❌ [WA] sendClientWelcome:', err?.message))
+  })
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export const clientAuthService = {
@@ -193,7 +205,6 @@ export const clientAuthService = {
       (whatsapp && await findAccountByWhatsappGlobal(whatsapp))
 
     if (existingGlobal) {
-      // Verifica se a senha bate — mesma pessoa querendo vincular nova barbearia
       const passwordMatches = await bcrypt.compare(password, existingGlobal.password_hash)
       if (!passwordMatches) {
         throw new Error(
@@ -201,11 +212,9 @@ export const clientAuthService = {
         )
       }
 
-      // Senha correta → cria client e account para a nova barbearia
       let client = await findExistingClient(barbershopId, email, whatsapp)
 
       if (!client) {
-        // Busca dados do client original para reaproveitar nome
         const { data: originalClient } = await supabaseAdmin
           .from('clients').select('name, email, phone, whatsapp')
           .eq('id', existingGlobal.client_id).single()
@@ -213,9 +222,9 @@ export const clientAuthService = {
         const { data, error } = await supabaseAdmin.from('clients')
           .insert({
             barbershop_id: barbershopId,
-            name:    name || originalClient?.name,
-            email:   email || originalClient?.email,
-            phone:   whatsapp || originalClient?.phone,
+            name:     name || originalClient?.name,
+            email:    email || originalClient?.email,
+            phone:    whatsapp || originalClient?.phone,
             whatsapp: whatsapp || originalClient?.whatsapp,
             is_active: true,
           })
@@ -231,7 +240,7 @@ export const clientAuthService = {
           barbershop_id: barbershopId,
           email,
           whatsapp,
-          password_hash: existingGlobal.password_hash, // reusa o hash existente
+          password_hash: existingGlobal.password_hash,
           is_active:     true,
         })
         .select().single()
@@ -243,6 +252,9 @@ export const clientAuthService = {
         barbershopId,
         role: 'client',
       })
+
+      // WhatsApp de boas-vindas para nova barbearia vinculada
+      fireWelcomeWhatsApp(barbershopId, client.name, whatsapp)
 
       return {
         token,
@@ -304,6 +316,7 @@ export const clientAuthService = {
       role: 'client',
     })
 
+    // E-mail de boas-vindas
     if (email) {
       setImmediate(() => {
         sendWelcomeClient({
@@ -314,6 +327,9 @@ export const clientAuthService = {
         }).catch(err => console.error('❌ [email] sendWelcomeClient:', err?.message))
       })
     }
+
+    // WhatsApp de boas-vindas
+    fireWelcomeWhatsApp(barbershopId, name, whatsapp)
 
     return {
       token,
@@ -374,7 +390,6 @@ export const clientAuthService = {
 
     const client = await getClientById(auth.clientId, auth.barbershopId)
 
-    // Busca todas as barbearias vinculadas ao e-mail/whatsapp deste cliente
     const identifier = account.email || account.whatsapp
     let linkedBarbershops: any[] = []
 
@@ -472,8 +487,6 @@ export const clientAuthService = {
 
     const passwordHash = await bcrypt.hash(newPassword, 12)
 
-    // Atualiza a senha em TODAS as contas vinculadas a este account
-    // para manter a senha sincronizada entre barbearias
     const { data: targetAccount } = await supabaseAdmin
       .from('client_accounts').select('email, whatsapp')
       .eq('id', tokenRow.client_account_id).single()
