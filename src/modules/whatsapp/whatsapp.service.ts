@@ -15,7 +15,7 @@ export const whatsappService = {
     }
   },
 
-  // ─── Mensagem de boas-vindas ao cliente após cadastro ─────────────────────────
+  // ─── Boas-vindas para o cliente após cadastro ──────────────────────────────
 
   async sendClientWelcome({
     barbershopId,
@@ -38,7 +38,6 @@ export const whatsappService = {
 
       if (!shop?.meta_phone_id || !shop?.meta_access_token) return
 
-      // Verifica se a barbearia tem planos ativos
       const { data: plans } = await supabaseAdmin
         .from('plans')
         .select('id')
@@ -46,9 +45,8 @@ export const whatsappService = {
         .eq('is_active', true)
         .limit(1)
 
-      const hasPlans = Boolean(plans?.length)
-
-      const baseUrl  = 'https://bbarberflow.com.br/client'
+      const hasPlans  = Boolean(plans?.length)
+      const baseUrl   = 'https://bbarberflow.com.br/client'
       const firstName = String(clientName || '').split(' ')[0] || 'cliente'
 
       const message = [
@@ -80,7 +78,59 @@ export const whatsappService = {
     }
   },
 
-  // ─── Processamento de mensagens recebidas ─────────────────────────────────────
+  // ─── Alerta para o dono quando um novo cliente se cadastra ────────────────
+
+  async sendOwnerNewClientAlert({
+    barbershopId,
+    clientName,
+    clientWhatsapp,
+  }: {
+    barbershopId: string
+    clientName: string
+    clientWhatsapp: string | null
+  }) {
+    try {
+      const { data: shop } = await supabaseAdmin
+        .from('barbershops')
+        .select('id, name, whatsapp, meta_phone_id, meta_access_token, notification_settings')
+        .eq('id', barbershopId)
+        .single()
+
+      if (!shop) return
+
+      // Respeita a configuração do dono
+      const settings = shop.notification_settings || {}
+      const alertEnabled = settings.new_client_alert !== false // default true
+      if (!alertEnabled) return
+
+      // Precisa do WhatsApp do dono e do bot configurado
+      const ownerPhone = String(shop.whatsapp || '').replace(/\D/g, '')
+      if (!ownerPhone || ownerPhone.length < 10) return
+      if (!shop.meta_phone_id || !shop.meta_access_token) return
+
+      const phoneDisplay = clientWhatsapp
+        ? clientWhatsapp.replace(/\D/g, '').replace(/^55/, '').replace(/(\d{2})(\d{4,5})(\d{4})/, '($1) $2-$3')
+        : 'Não informado'
+
+      const message = [
+        `🎉 *Novo cliente cadastrado!*`,
+        ``,
+        `*Nome:* ${clientName}`,
+        `*WhatsApp:* ${phoneDisplay}`,
+        ``,
+        `Ele(a) se cadastrou agora pelo link de convite da *${shop.name}*.`,
+        ``,
+        `Acesse o painel para ver o perfil completo:`,
+        `👉 https://bbarberflow.com.br/app/clientes`,
+      ].join('\n')
+
+      await this.sendMessage(shop.meta_phone_id, shop.meta_access_token, ownerPhone, message)
+    } catch (err: any) {
+      console.error('❌ [WA] sendOwnerNewClientAlert:', err?.message)
+    }
+  },
+
+  // ─── Processamento de mensagens recebidas ─────────────────────────────────
 
   async processIncoming(barbershopId: string, phone: string, text: string, waMessageId: string) {
     const { data: shop } = await supabaseAdmin
