@@ -15,6 +15,73 @@ export const whatsappService = {
     }
   },
 
+  // ─── Mensagem de boas-vindas ao cliente após cadastro ─────────────────────────
+
+  async sendClientWelcome({
+    barbershopId,
+    clientName,
+    clientWhatsapp,
+  }: {
+    barbershopId: string
+    clientName: string
+    clientWhatsapp: string
+  }) {
+    try {
+      const phone = clientWhatsapp.replace(/\D/g, '')
+      if (!phone || phone.length < 10) return
+
+      const { data: shop } = await supabaseAdmin
+        .from('barbershops')
+        .select('id, name, slug, meta_phone_id, meta_access_token')
+        .eq('id', barbershopId)
+        .single()
+
+      if (!shop?.meta_phone_id || !shop?.meta_access_token) return
+
+      // Verifica se a barbearia tem planos ativos
+      const { data: plans } = await supabaseAdmin
+        .from('plans')
+        .select('id')
+        .eq('barbershop_id', barbershopId)
+        .eq('is_active', true)
+        .limit(1)
+
+      const hasPlans = Boolean(plans?.length)
+
+      const baseUrl  = 'https://bbarberflow.com.br/client'
+      const firstName = String(clientName || '').split(' ')[0] || 'cliente'
+
+      const message = [
+        `Olá, ${firstName}! 🎉`,
+        ``,
+        `Seu cadastro na *${shop.name}* foi realizado com sucesso!`,
+        ``,
+        `Agora você já pode agendar seus horários direto pelo celular:`,
+        ``,
+        `✂️ *Agendar horário*`,
+        `👉 ${baseUrl}/agendar`,
+        ``,
+        ...(hasPlans
+          ? [
+              `💈 *Planos de corte*`,
+              `A ${shop.name} oferece planos mensais com cortes incluídos. Confira:`,
+              `👉 ${baseUrl}/planos`,
+              ``,
+            ]
+          : []),
+        `Para acessar, use o e-mail e a senha que você cadastrou.`,
+        ``,
+        `Te esperamos! 💈`,
+      ].join('\n')
+
+      await this.sendMessage(shop.meta_phone_id, shop.meta_access_token, phone, message)
+    } catch (err: any) {
+      console.error('❌ [WA] sendClientWelcome:', err?.message)
+    }
+  },
+
+  // ─── Processamento de mensagens recebidas ─────────────────────────────────────
+
   async processIncoming(barbershopId: string, phone: string, text: string, waMessageId: string) {
     const { data: shop } = await supabaseAdmin
       .from('barbershops')
