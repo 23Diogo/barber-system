@@ -164,13 +164,16 @@ async function getClientById(clientId: string, barbershopId: string) {
 // ─── Helper: dispara WhatsApp de boas-vindas de forma assíncrona ───────────────
 
 function fireWelcomeWhatsApp(barbershopId: string, clientName: string, clientWhatsapp: string | null) {
-  if (!clientWhatsapp) return
   setImmediate(() => {
-    whatsappService.sendClientWelcome({
-      barbershopId,
-      clientName,
-      clientWhatsapp,
-    }).catch(err => console.error('❌ [WA] sendClientWelcome:', err?.message))
+    // Boas-vindas para o cliente
+    if (clientWhatsapp) {
+      whatsappService.sendClientWelcome({ barbershopId, clientName, clientWhatsapp })
+        .catch(err => console.error('❌ [WA] sendClientWelcome:', err?.message))
+    }
+
+    // Alerta para o dono (respeita configuração new_client_alert)
+    whatsappService.sendOwnerNewClientAlert({ barbershopId, clientName, clientWhatsapp })
+      .catch(err => console.error('❌ [WA] sendOwnerNewClientAlert:', err?.message))
   })
 }
 
