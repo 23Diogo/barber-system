@@ -9,29 +9,87 @@ import {
   getSettings,
 } from '../../services/notification.service'
 
+// ─── Helper: converte "HH:MM" em minutos desde meia-noite ─────────────────────
+
+function timeToMinutes(t: string | null | undefined, defaultHour: number): number {
+  if (!t) return defaultHour * 60
+  const [h, m] = t.split(':').map(Number)
+  return (Number.isFinite(h) ? h : defaultHour) * 60 + (Number.isFinite(m) ? m : 0)
+}
+
 export const appointmentsService = {
 
-  async getAvailableSlots(barbershopId: string, barberId: string, serviceId: string, date: string) {
-    const { data: svc } = await supabaseAdmin.from('services').select('duration_min').eq('id', serviceId).single()
-    if (!svc) throw new Error('Serviço não encontrado')
+  async getAvailableSlots(
+    barbershopId: string,
+    barberId: string,
+    serviceId: string,
+    date: string
+  ) {
+    // ── Busca serviço e horário do barbeiro em paralelo ──────────────────────
+    const [svcResult, barberResult] = await Promise.all([
+      supabaseAdmin
+        .from('services')
+        .select('duration_min')
+        .eq('id', serviceId)
+        .single(),
+      supabaseAdmin
+        .from('barber_profiles')
+        .select('working_hours')
+        .eq('id', barberId)
+        .single(),
+    ])
 
+    if (!svcResult.data) throw new Error('Serviço não encontrado')
+
+    const durationMin = Number(svcResult.data.duration_min || 30)
+    const wh          = barberResult.data?.working_hours || {}
+
+    // ── Parâmetros de horário do barbeiro (fallback: 08:00–19:00, almoço 12:00–13:00) ──
+    const startMin      = timeToMinutes(wh.start,       8)
+    const endMin        = timeToMinutes(wh.end,        19)
+    const interval      = Number(wh.slot_interval || 30)
+    const hasLunch      = Boolean(wh.lunch_start && wh.lunch_end)
+    const lunchStartMin = hasLunch ? timeToMinutes(wh.lunch_start, 12) : null
+    const lunchEndMin   = hasLunch ? timeToMinutes(wh.lunch_end,   13) : null
+
+    // ── Agendamentos existentes do barbeiro neste dia ────────────────────────
     const { data: existing } = await supabaseAdmin
       .from('appointments')
       .select('scheduled_at, ends_at')
       .eq('barber_id', barberId)
-      .gte('scheduled_at', `${date}T00:00:00Z`)
-      .lte('scheduled_at', `${date}T23:59:59Z`)
+      .gte('scheduled_at', `${date}T00:00:00`)
+      .lte('scheduled_at', `${date}T23:59:59`)
       .neq('status', 'cancelled')
 
+    // ── Gera slots dentro do horário de trabalho ─────────────────────────────
     const slots: string[] = []
-    for (let h = 8; h < 19; h++) {
-      for (let m = 0; m < 60; m += 30) {
-        const start = new Date(`${date}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`)
-        const end   = new Date(start.getTime() + svc.duration_min * 60000)
-        const conflict = existing?.some(a => start < new Date(a.ends_at) && end > new Date(a.scheduled_at))
-        if (!conflict && end.getHours() <= 19) slots.push(start.toISOString())
+
+    for (let minute = startMin; minute < endMin; minute += interval) {
+      const slotEndMin = minute + durationMin
+
+      // Slot não cabe dentro do horário de trabalho
+      if (slotEndMin > endMin) break
+
+      // Slot cai no horário de almoço
+      if (lunchStartMin !== null && lunchEndMin !== null) {
+        if (minute < lunchEndMin && slotEndMin > lunchStartMin) continue
       }
+
+      const h     = Math.floor(minute / 60)
+      const m     = minute % 60
+      const start = new Date(
+        `${date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`
+      )
+      const end = new Date(start.getTime() + durationMin * 60_000)
+
+      // Verifica conflito com agendamentos já existentes
+      const conflict = existing?.some(
+        a => start < new Date(a.ends_at) && end > new Date(a.scheduled_at)
+      )
+
+      if (!conflict) slots.push(start.toISOString())
     }
+
     return slots
   },
 
@@ -72,17 +130,16 @@ export const appointmentsService = {
 
     if (error) throw new Error(error.message)
 
-    // ─── Notificações ───────────────────────────────────────────────────────
     setImmediate(() => this._notifyAppointmentConfirmed(apt).catch(console.error))
 
     return apt
   },
 
   async _notifyAppointmentConfirmed(apt: any) {
-    const shop: any   = apt.barbershops
-    const client: any = apt.clients
+    const shop: any    = apt.barbershops
+    const client: any  = apt.clients
     const service: any = apt.services
-    const barber: any = apt.barber_profiles
+    const barber: any  = apt.barber_profiles
 
     if (!shop?.meta_phone_id || !shop?.meta_access_token) return
 
@@ -93,7 +150,6 @@ export const appointmentsService = {
     const dateStr     = formatDateBR(apt.scheduled_at)
     const timeStr     = formatTimeBR(apt.scheduled_at)
 
-    // Mensagem para o cliente
     if (settings.appointment_confirmed && clientPhone) {
       await sendNotification({
         barbershopId:   shop.id,
@@ -115,7 +171,6 @@ export const appointmentsService = {
       })
     }
 
-    // Mensagem para o barbeiro
     if (settings.appointment_confirmed && barberPhone) {
       await sendNotification({
         barbershopId:   shop.id,
@@ -167,18 +222,27 @@ export const appointmentsService = {
     })
 
     const pts = Math.floor(apt.final_price)
-    const { data: cl } = await supabaseAdmin.from('clients').select('loyalty_points').eq('id', apt.client_id).single()
+    const { data: cl } = await supabaseAdmin
+      .from('clients')
+      .select('loyalty_points')
+      .eq('id', apt.client_id)
+      .single()
+
     await supabaseAdmin.from('loyalty_transactions').insert({
-      barbershop_id: barbershopId,
-      client_id:     apt.client_id,
+      barbershop_id:  barbershopId,
+      client_id:      apt.client_id,
       appointment_id: id,
-      action:        'earn',
-      points:        pts,
+      action:         'earn',
+      points:         pts,
       balance_before: cl?.loyalty_points ?? 0,
       balance_after:  (cl?.loyalty_points ?? 0) + pts,
-      description:   'Pontos pelo atendimento',
+      description:    'Pontos pelo atendimento',
     })
-    await supabaseAdmin.from('clients').update({ loyalty_points: (cl?.loyalty_points ?? 0) + pts }).eq('id', apt.client_id)
+
+    await supabaseAdmin
+      .from('clients')
+      .update({ loyalty_points: (cl?.loyalty_points ?? 0) + pts })
+      .eq('id', apt.client_id)
 
     return apt
   },
@@ -203,15 +267,14 @@ export const appointmentsService = {
 
     if (error) throw new Error(error.message)
 
-    // ─── Notificação de cancelamento ────────────────────────────────────────
     setImmediate(() => this._notifyAppointmentCancelled(apt).catch(console.error))
 
     return apt
   },
 
   async _notifyAppointmentCancelled(apt: any) {
-    const shop: any   = apt.barbershops
-    const client: any = apt.clients
+    const shop: any    = apt.barbershops
+    const client: any  = apt.clients
     const service: any = apt.services
 
     if (!shop?.meta_phone_id || !shop?.meta_access_token) return
