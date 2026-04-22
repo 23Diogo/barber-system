@@ -72,6 +72,55 @@ async function getBarbershopBySlug(slug: string) {
 
 // ─── Queries internas ──────────────────────────────────────────────────────────
 
+async function findAccountByEmail(barbershopId: string, email: string) {
+  const { data, error } = await supabaseAdmin
+    .from('client_accounts').select('*')
+    .eq('barbershop_id', barbershopId).ilike('email', email).limit(1)
+  if (error) throw new Error(error.message)
+  return data?.[0] || null
+}
+
+async function findAccountByWhatsapp(barbershopId: string, whatsapp: string) {
+  const { data, error } = await supabaseAdmin
+    .from('client_accounts').select('*')
+    .eq('barbershop_id', barbershopId).eq('whatsapp', whatsapp).limit(1)
+  if (error) throw new Error(error.message)
+  return data?.[0] || null
+}
+
+// Busca account em QUALQUER barbearia pelo e-mail (para multi-barbearia)
+async function findAccountByEmailGlobal(email: string) {
+  const { data, error } = await supabaseAdmin
+    .from('client_accounts').select('*')
+    .ilike('email', email).eq('is_active', true).limit(1)
+  if (error) throw new Error(error.message)
+  return data?.[0] || null
+}
+
+// Busca account em QUALQUER barbearia pelo whatsapp (para multi-barbearia)
+async function findAccountByWhatsappGlobal(whatsapp: string) {
+  const { data, error } = await supabaseAdmin
+    .from('client_accounts').select('*')
+    .eq('whatsapp', whatsapp).eq('is_active', true).limit(1)
+  if (error) throw new Error(error.message)
+  return data?.[0] || null
+}
+
+async function findAccountByIdentifier(barbershopId: string, identifier: string) {
+  const normalizedEmail    = normalizeEmail(identifier)
+  const normalizedWhatsapp = normalizeWhatsapp(identifier)
+
+  if (isEmailIdentifier(identifier) && normalizedEmail) {
+    return await findAccountByEmail(barbershopId, normalizedEmail)
+  }
+
+  if (normalizedWhatsapp) {
+    return await findAccountByWhatsapp(barbershopId, normalizedWhatsapp)
+  }
+
+  return null
+}
+
 async function findClientByEmail(barbershopId: string, email: string) {
   const { data, error } = await supabaseAdmin
     .from('clients').select('*')
@@ -104,27 +153,6 @@ async function findExistingClient(barbershopId: string, email: string | null, wh
   return null
 }
 
-async function findAccountByIdentifier(barbershopId: string, identifier: string) {
-  const normalizedEmail    = normalizeEmail(identifier)
-  const normalizedWhatsapp = normalizeWhatsapp(identifier)
-
-  if (isEmailIdentifier(identifier) && normalizedEmail) {
-    const { data, error } = await supabaseAdmin.from('client_accounts').select('*')
-      .eq('barbershop_id', barbershopId).ilike('email', normalizedEmail).eq('is_active', true).limit(1)
-    if (error) throw new Error(error.message)
-    return data?.[0] || null
-  }
-
-  if (normalizedWhatsapp) {
-    const { data, error } = await supabaseAdmin.from('client_accounts').select('*')
-      .eq('barbershop_id', barbershopId).eq('whatsapp', normalizedWhatsapp).eq('is_active', true).limit(1)
-    if (error) throw new Error(error.message)
-    return data?.[0] || null
-  }
-
-  return null
-}
-
 async function getClientById(clientId: string, barbershopId: string) {
   const { data, error } = await supabaseAdmin
     .from('clients')
@@ -150,12 +178,89 @@ export const clientAuthService = {
     if (!whatsapp && !email) throw new Error('Informe WhatsApp ou e-mail')
     if (password.length < 6) throw new Error('A senha deve ter pelo menos 6 caracteres')
 
-    if (email    && await findAccountByIdentifier(barbershopId, email))    throw new Error('Já existe uma conta com este e-mail')
-    if (whatsapp && await findAccountByIdentifier(barbershopId, whatsapp)) throw new Error('Já existe uma conta com este WhatsApp')
+    // ── Verifica se já existe conta NESTA barbearia ──
+    const existingInThisShop =
+      (email    && await findAccountByEmail(barbershopId, email)) ||
+      (whatsapp && await findAccountByWhatsapp(barbershopId, whatsapp))
 
+    if (existingInThisShop) {
+      throw new Error('Você já tem uma conta nesta barbearia. Use a tela de login.')
+    }
+
+    // ── Verifica se já existe conta em OUTRA barbearia (multi-barbearia) ──
+    const existingGlobal =
+      (email    && await findAccountByEmailGlobal(email)) ||
+      (whatsapp && await findAccountByWhatsappGlobal(whatsapp))
+
+    if (existingGlobal) {
+      // Verifica se a senha bate — mesma pessoa querendo vincular nova barbearia
+      const passwordMatches = await bcrypt.compare(password, existingGlobal.password_hash)
+      if (!passwordMatches) {
+        throw new Error(
+          'Este e-mail já está cadastrado em outra barbearia. Use a mesma senha para criar um vínculo com esta barbearia.'
+        )
+      }
+
+      // Senha correta → cria client e account para a nova barbearia
+      let client = await findExistingClient(barbershopId, email, whatsapp)
+
+      if (!client) {
+        // Busca dados do client original para reaproveitar nome
+        const { data: originalClient } = await supabaseAdmin
+          .from('clients').select('name, email, phone, whatsapp')
+          .eq('id', existingGlobal.client_id).single()
+
+        const { data, error } = await supabaseAdmin.from('clients')
+          .insert({
+            barbershop_id: barbershopId,
+            name:    name || originalClient?.name,
+            email:   email || originalClient?.email,
+            phone:   whatsapp || originalClient?.phone,
+            whatsapp: whatsapp || originalClient?.whatsapp,
+            is_active: true,
+          })
+          .select().single()
+        if (error) throw new Error(error.message)
+        client = data
+      }
+
+      const { data: account, error: accountError } = await supabaseAdmin
+        .from('client_accounts')
+        .insert({
+          client_id:     client.id,
+          barbershop_id: barbershopId,
+          email,
+          whatsapp,
+          password_hash: existingGlobal.password_hash, // reusa o hash existente
+          is_active:     true,
+        })
+        .select().single()
+      if (accountError) throw new Error(accountError.message)
+
+      const token = signClientToken({
+        clientId:        client.id,
+        clientAccountId: account.id,
+        barbershopId,
+        role: 'client',
+      })
+
+      return {
+        token,
+        isNewBarbershopLink: true,
+        client: {
+          id: client.id, name: client.name, email: client.email,
+          phone: client.phone, whatsapp: client.whatsapp,
+          barbershopId, barbershopSlug: barbershop.slug,
+        },
+      }
+    }
+
+    // ── Cadastro normal — primeira barbearia ──
     let client = await findExistingClient(barbershopId, email, whatsapp)
 
-    if (client?.is_active === false) throw new Error('Cliente inativo. Procure a barbearia para reativar seu cadastro')
+    if (client?.is_active === false) {
+      throw new Error('Cliente inativo. Procure a barbearia para reativar seu cadastro')
+    }
 
     if (!client) {
       const { data, error } = await supabaseAdmin.from('clients')
@@ -165,7 +270,13 @@ export const clientAuthService = {
       client = data
     } else {
       const { data, error } = await supabaseAdmin.from('clients')
-        .update({ name: client.name || name, email: client.email || email, phone: client.phone || whatsapp, whatsapp: client.whatsapp || whatsapp, updated_at: new Date().toISOString() })
+        .update({
+          name:       client.name || name,
+          email:      client.email || email,
+          phone:      client.phone || whatsapp,
+          whatsapp:   client.whatsapp || whatsapp,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', client.id).eq('barbershop_id', barbershopId).select().single()
       if (error) throw new Error(error.message)
       client = data
@@ -173,14 +284,26 @@ export const clientAuthService = {
 
     const passwordHash = await bcrypt.hash(password, 12)
 
-    const { data: account, error: accountError } = await supabaseAdmin.from('client_accounts')
-      .insert({ client_id: client.id, barbershop_id: barbershopId, email, whatsapp, password_hash: passwordHash, is_active: true })
+    const { data: account, error: accountError } = await supabaseAdmin
+      .from('client_accounts')
+      .insert({
+        client_id:     client.id,
+        barbershop_id: barbershopId,
+        email,
+        whatsapp,
+        password_hash: passwordHash,
+        is_active:     true,
+      })
       .select().single()
     if (accountError) throw new Error(accountError.message)
 
-    const token = signClientToken({ clientId: client.id, clientAccountId: account.id, barbershopId, role: 'client' })
+    const token = signClientToken({
+      clientId:        client.id,
+      clientAccountId: account.id,
+      barbershopId,
+      role: 'client',
+    })
 
-    // E-mail de boas-vindas se tiver e-mail
     if (email) {
       setImmediate(() => {
         sendWelcomeClient({
@@ -194,7 +317,12 @@ export const clientAuthService = {
 
     return {
       token,
-      client: { id: client.id, name: client.name, email: client.email, phone: client.phone, whatsapp: client.whatsapp, barbershopId, barbershopSlug: barbershop.slug },
+      isNewBarbershopLink: false,
+      client: {
+        id: client.id, name: client.name, email: client.email,
+        phone: client.phone, whatsapp: client.whatsapp,
+        barbershopId, barbershopSlug: barbershop.slug,
+      },
     }
   },
 
@@ -219,23 +347,65 @@ export const clientAuthService = {
       .update({ last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', account.id).eq('barbershop_id', barbershopId)
 
-    const token = signClientToken({ clientId: client.id, clientAccountId: account.id, barbershopId, role: 'client' })
+    const token = signClientToken({
+      clientId:        client.id,
+      clientAccountId: account.id,
+      barbershopId,
+      role: 'client',
+    })
 
     return {
       token,
-      client: { id: client.id, name: client.name, email: client.email, phone: client.phone, whatsapp: client.whatsapp, barbershopId, barbershopSlug: barbershop.slug },
+      client: {
+        id: client.id, name: client.name, email: client.email,
+        phone: client.phone, whatsapp: client.whatsapp,
+        barbershopId, barbershopSlug: barbershop.slug,
+      },
     }
   },
 
   async me(auth: ClientAuthPayload) {
-    const { data: account, error } = await supabaseAdmin.from('client_accounts')
+    const { data: account, error } = await supabaseAdmin
+      .from('client_accounts')
       .select('id, client_id, barbershop_id, email, whatsapp, is_active, last_login_at, created_at')
-      .eq('id', auth.clientAccountId).eq('client_id', auth.clientId).eq('barbershop_id', auth.barbershopId).eq('is_active', true).single()
+      .eq('id', auth.clientAccountId).eq('client_id', auth.clientId)
+      .eq('barbershop_id', auth.barbershopId).eq('is_active', true).single()
     if (error) throw new Error(error.message)
 
     const client = await getClientById(auth.clientId, auth.barbershopId)
+
+    // Busca todas as barbearias vinculadas ao e-mail/whatsapp deste cliente
+    const identifier = account.email || account.whatsapp
+    let linkedBarbershops: any[] = []
+
+    if (identifier) {
+      const field = account.email ? 'email' : 'whatsapp'
+      const { data: allAccounts } = await supabaseAdmin
+        .from('client_accounts')
+        .select('barbershop_id, barbershops(id, name, slug)')
+        .ilike(field, identifier)
+        .eq('is_active', true)
+
+      if (allAccounts?.length) {
+        linkedBarbershops = allAccounts
+          .map((a: any) => a.barbershops)
+          .filter(Boolean)
+      }
+    }
+
     return {
-      client: { id: client.id, name: client.name, email: client.email, phone: client.phone, whatsapp: client.whatsapp, notes: client.notes, isActive: client.is_active, isVip: client.is_vip, barbershopId: client.barbershop_id },
+      client: {
+        id:           client.id,
+        name:         client.name,
+        email:        client.email,
+        phone:        client.phone,
+        whatsapp:     client.whatsapp,
+        notes:        client.notes,
+        isActive:     client.is_active,
+        isVip:        client.is_vip,
+        barbershopId: client.barbershop_id,
+        barbershops:  linkedBarbershops,
+      },
       account,
     }
   },
@@ -263,7 +433,6 @@ export const clientAuthService = {
       .insert({ client_account_id: account.id, token_hash: tokenHash, expires_at: expiresAt })
     if (error) throw new Error(error.message)
 
-    // E-mail de recuperação se tiver e-mail
     const clientEmail = account.email
     if (clientEmail) {
       const client = await getClientById(account.client_id, barbershopId).catch(() => null)
@@ -294,7 +463,8 @@ export const clientAuthService = {
     const tokenHash = hashResetToken(token)
 
     const { data: rows, error } = await supabaseAdmin.from('client_password_reset_tokens')
-      .select('*').eq('token_hash', tokenHash).is('used_at', null).gt('expires_at', new Date().toISOString()).limit(1)
+      .select('*').eq('token_hash', tokenHash).is('used_at', null)
+      .gt('expires_at', new Date().toISOString()).limit(1)
     if (error) throw new Error(error.message)
 
     const tokenRow = rows?.[0]
@@ -302,9 +472,25 @@ export const clientAuthService = {
 
     const passwordHash = await bcrypt.hash(newPassword, 12)
 
-    await supabaseAdmin.from('client_accounts')
-      .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
-      .eq('id', tokenRow.client_account_id)
+    // Atualiza a senha em TODAS as contas vinculadas a este account
+    // para manter a senha sincronizada entre barbearias
+    const { data: targetAccount } = await supabaseAdmin
+      .from('client_accounts').select('email, whatsapp')
+      .eq('id', tokenRow.client_account_id).single()
+
+    if (targetAccount) {
+      const field = targetAccount.email ? 'email' : 'whatsapp'
+      const value = targetAccount.email || targetAccount.whatsapp
+      if (value) {
+        await supabaseAdmin.from('client_accounts')
+          .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+          .ilike(field, value)
+      }
+    } else {
+      await supabaseAdmin.from('client_accounts')
+        .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+        .eq('id', tokenRow.client_account_id)
+    }
 
     await supabaseAdmin.from('client_password_reset_tokens')
       .update({ used_at: new Date().toISOString() }).eq('id', tokenRow.id)
