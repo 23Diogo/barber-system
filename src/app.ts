@@ -24,6 +24,7 @@ import subscriptionsRoutes from './modules/subscriptions/subscriptions.routes'
 import paymentsRoutes      from './modules/payments/payments.routes'
 import mercadoPagoRoutes   from './modules/mercadopago/mercadopago.routes'
 import reviewsRoutes       from './modules/reviews/reviews.routes'
+import invitesRouter       from './modules/barbershops/invites.routes'
 
 // ─── Jobs existentes ──────────────────────────────────────────────────────────
 import { startLicenseCheckJob } from './jobs/checkLicenses'
@@ -92,6 +93,7 @@ app.use('/api/subscriptions', subscriptionsRoutes)
 app.use('/api/payments',      paymentsRoutes)
 app.use('/api/mercadopago',   mercadoPagoRoutes)
 app.use('/api/reviews',       reviewsRoutes)
+app.use('/api/barbershops',   invitesRouter)
 
 // ─── Error handler global ─────────────────────────────────────────────────────
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
