@@ -30,8 +30,6 @@ type ResetPasswordInput = {
   newPassword: string
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 function normalizeEmail(value?: string | null) {
   const email = String(value || '').trim().toLowerCase()
   return email || null
@@ -53,8 +51,6 @@ function signClientToken(payload: ClientAuthPayload) {
 function hashResetToken(token: string) {
   return crypto.createHash('sha256').update(token).digest('hex')
 }
-
-// ─── Busca barbearia ──────────────────────────────────────────────────────────
 
 async function getBarbershopBySlug(slug: string) {
   const normalizedSlug = String(slug || '').trim().toLowerCase()
@@ -85,8 +81,6 @@ async function getBarbershopById(barbershopId: string) {
   if (!data.is_active) throw new Error('Barbearia indisponível no momento')
   return data
 }
-
-// ─── Queries internas ─────────────────────────────────────────────────────────
 
 async function findAccountByEmail(barbershopId: string, email: string) {
   const { data, error } = await supabaseAdmin
@@ -250,36 +244,49 @@ async function getLinkedBarbershopsByAccount(account: any, selectedBarbershopId?
 
   const field = account?.email ? 'email' : 'whatsapp'
 
-  let query = supabaseAdmin
+  let accountsQuery = supabaseAdmin
     .from('client_accounts')
-    .select('barbershop_id, barbershops(id, name, slug, is_active)')
+    .select('barbershop_id')
     .eq('is_active', true)
 
-  query =
+  accountsQuery =
     field === 'email'
-      ? query.ilike('email', identifier)
-      : query.eq('whatsapp', identifier)
+      ? accountsQuery.ilike('email', identifier)
+      : accountsQuery.eq('whatsapp', identifier)
 
-  const { data, error } = await query
-  if (error) throw new Error(error.message)
+  const { data: accountRows, error: accountRowsError } = await accountsQuery
 
-  const map = new Map<string, any>()
-
-  for (const row of data || []) {
-    const relation = (row as any).barbershops
-    const shop = Array.isArray(relation) ? relation[0] : relation
-    if (!shop?.id) continue
-
-    map.set(shop.id, {
-      id: shop.id,
-      name: shop.name,
-      slug: shop.slug,
-      is_active: shop.is_active,
-      is_selected: shop.id === selectedBarbershopId,
-    })
+  if (accountRowsError) {
+    throw new Error(accountRowsError.message)
   }
 
-  return Array.from(map.values())
+  const barbershopIds = Array.from(
+    new Set(
+      (accountRows || [])
+        .map((row: any) => row.barbershop_id)
+        .filter(Boolean)
+    )
+  )
+
+  if (!barbershopIds.length) return []
+
+  const { data: shops, error: shopsError } = await supabaseAdmin
+    .from('barbershops')
+    .select('id, name, slug, is_active')
+    .in('id', barbershopIds)
+    .eq('is_active', true)
+
+  if (shopsError) {
+    throw new Error(shopsError.message)
+  }
+
+  return (shops || []).map((shop: any) => ({
+    id: shop.id,
+    name: shop.name,
+    slug: shop.slug,
+    is_active: shop.is_active,
+    is_selected: shop.id === selectedBarbershopId,
+  }))
 }
 
 async function ensureLinkedClientAccountToBarbershop(params: {
@@ -363,8 +370,6 @@ async function ensureLinkedClientAccountToBarbershop(params: {
   }
 }
 
-// ─── Helper: dispara WhatsApp de boas-vindas de forma assíncrona ──────────────
-
 function fireWelcomeWhatsApp(barbershopId: string, clientName: string, clientWhatsapp: string | null) {
   setImmediate(() => {
     if (clientWhatsapp) {
@@ -376,8 +381,6 @@ function fireWelcomeWhatsApp(barbershopId: string, clientName: string, clientWha
       .catch(err => console.error('❌ [WA] sendOwnerNewClientAlert:', err?.message))
   })
 }
-
-// ─── Service ──────────────────────────────────────────────────────────────────
 
 export const clientAuthService = {
   async register(input: RegisterClientInput) {
