@@ -12,7 +12,7 @@ function daysBetween(from: Date, to: Date): number {
   return Math.round(diff / 86_400_000)
 }
 
-export async function runSubscriptionReminder(): Promise<void> {
+export async function runSubscriptionReminder(currentHour: number): Promise<void> {
   console.log('🔔 [job] subscription-reminder iniciado')
 
   const today = new Date()
@@ -26,31 +26,43 @@ export async function runSubscriptionReminder(): Promise<void> {
     .not('meta_phone_id', 'is', null)
     .not('subscription_end', 'is', null)
 
-  if (error) { console.error('❌ subscription-reminder query error:', error.message); return }
+  if (error) {
+    console.error('❌ [subscription-reminder] erro ao buscar barbearias:', error.message)
+    return
+  }
 
   for (const shop of shops ?? []) {
     const settings = getSettings(shop)
+
+    // ── Filtro por hora configurada da barbearia ──────────────────────────────
+    const shopHour = Number(settings.daily_jobs_hour ?? 18)
+    if (shopHour !== currentHour) continue
+
     const reminderDays: number[] = settings.subscription_reminder_days ?? [5, 3, 1, 0]
 
     const subEnd = new Date(shop.subscription_end)
     subEnd.setHours(0, 0, 0, 0)
+
     const daysUntil = daysBetween(today, subEnd)
 
+    // Ignora se já venceu ou se o dia não está na lista de lembretes
+    if (daysUntil < 0) continue
     if (!reminderDays.includes(daysUntil)) continue
-    if (daysUntil < 0) continue // já venceu
 
-    // Busca nome do plano
+    // Busca nome e valor do plano
     let planName = 'BarberFlow'
-    let amount = 'R$ 0,00'
+    let amount   = 'R$ 0,00'
+
     if (shop.plan_id) {
       const { data: plan } = await supabaseAdmin
         .from('plans')
         .select('name, price')
         .eq('id', shop.plan_id)
         .maybeSingle()
+
       if (plan) {
         planName = plan.name
-        amount = formatCurrencyBR(Number(plan.price || 0))
+        amount   = formatCurrencyBR(Number(plan.price || 0))
       }
     }
 
