@@ -1,5 +1,7 @@
-import { supabaseAdmin } from '../config/supabase'
-import { whatsappService } from '../modules/whatsapp/whatsapp.service'
+// CORRETO
+import { supabaseAdmin }    from '../../config/supabase'
+import { whatsappService }  from '../whatsapp/whatsapp.service'
+
 
 export type NotificationType =
   | 'appointment_confirmed'
