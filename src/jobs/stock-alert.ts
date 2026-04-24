@@ -25,14 +25,12 @@ export async function runStockAlert(currentHour: number): Promise<void> {
   for (const shop of shops ?? []) {
     const settings = getSettings(shop)
 
-    // ── Filtro por hora configurada da barbearia ──────────────────────────────
-    const shopHour = Number(settings.daily_jobs_hour ?? 18)
-    if (shopHour !== currentHour) continue
+    // Filtro: notificação habilitada
+    if (!settings.stock_alert_enabled) continue
 
-    // ── Filtro por setting de alerta de estoque ───────────────────────────────
-    if (!settings.stock_alert) continue
+    // Filtro: hora configurada desta notificação para esta barbearia
+    if (Number(settings.stock_alert_hour ?? 8) !== currentHour) continue
 
-    // Busca itens ativos desta barbearia em uma única query
     const { data: stockItems, error: stockError } = await supabaseAdmin
       .from('stock_items')
       .select('id, name, current_stock, min_stock, unit')
@@ -40,11 +38,10 @@ export async function runStockAlert(currentHour: number): Promise<void> {
       .eq('is_active', true)
 
     if (stockError) {
-      console.error(`❌ [stock-alert] erro ao buscar estoque da barbearia ${shop.id}:`, stockError.message)
+      console.error(`❌ [stock-alert] barbearia ${shop.id}:`, stockError.message)
       continue
     }
 
-    // Filtra em memória os itens abaixo do mínimo
     const critical = (stockItems ?? []).filter(
       (item) => Number(item.current_stock) < Number(item.min_stock)
     )
@@ -62,13 +59,10 @@ export async function runStockAlert(currentHour: number): Promise<void> {
       })),
     })
 
-    // referenceId único por dia para evitar spam duplicado
-    const referenceId = `stock-${shop.id}-${today}`
-
     await sendNotification({
       barbershopId:   shop.id,
       type:           'stock_alert',
-      referenceId,
+      referenceId:    `stock-${shop.id}-${today}`,
       referenceDate:  today,
       recipientPhone: shop.whatsapp,
       phoneNumberId:  shop.meta_phone_id,
