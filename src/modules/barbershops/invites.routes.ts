@@ -43,36 +43,51 @@ router.post('/invites', async (req: Request, res: Response) => {
 })
 
 // ─── GET /api/barbershops/invites/stats ───────────────────────────────────────
-// Retorna: { sent, converted, rate }
+// sent      → total de convites enviados pelo dono
+// converted → clientes da barbearia que possuem conta no portal (client_accounts)
+//             proxy correto: se tem conta no portal, entrou pelo link de convite
+// rate      → percentual (0–100)
 
 router.get('/invites/stats', async (req: Request, res: Response) => {
   try {
+    const barbershopId = req.user!.barbershopId
+
+    // 1. Total de convites enviados
     const { count: sent, error: sentError } = await supabaseAdmin
       .from('client_invites')
       .select('*', { count: 'exact', head: true })
-      .eq('barbershop_id', req.user!.barbershopId)
+      .eq('barbershop_id', barbershopId)
 
     if (sentError) throw sentError
 
-    const { count: converted, error: convertedError } = await supabaseAdmin
-      .from('client_invites')
-      .select('*', { count: 'exact', head: true })
-      .eq('barbershop_id', req.user!.barbershopId)
-      .not('client_id', 'is', null)
+    // 2. IDs dos clientes desta barbearia
+    const { data: clientRows, error: clientError } = await supabaseAdmin
+      .from('clients')
+      .select('id')
+      .eq('barbershop_id', barbershopId)
 
-    if (convertedError) throw convertedError
+    if (clientError) throw clientError
 
-    const totalSent      = sent      ?? 0
-    const totalConverted = converted ?? 0
-    const rate           = totalSent > 0
-      ? Math.round((totalConverted / totalSent) * 100)
+    const clientIds = (clientRows ?? []).map((c: any) => c.id)
+
+    // 3. Quantos desses clientes criaram conta no portal
+    let converted = 0
+    if (clientIds.length > 0) {
+      const { count, error: accountError } = await supabaseAdmin
+        .from('client_accounts')
+        .select('*', { count: 'exact', head: true })
+        .in('client_id', clientIds)
+
+      if (accountError) throw accountError
+      converted = count ?? 0
+    }
+
+    const totalSent = sent ?? 0
+    const rate      = totalSent > 0
+      ? Math.round((converted / totalSent) * 100)
       : 0
 
-    return res.json({
-      sent:      totalSent,
-      converted: totalConverted,
-      rate,
-    })
+    return res.json({ sent: totalSent, converted, rate })
   } catch (err: any) {
     return res.status(400).json({ error: err.message })
   }
