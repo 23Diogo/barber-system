@@ -5,7 +5,7 @@ import { authenticate } from '../../middleware/auth'
 const router = Router()
 router.use(authenticate)
 
-// GET /api/barbershops/me — dados completos da barbearia (já usado em /api/auth/me mas útil separado)
+// GET /api/barbershops/me
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const { data, error } = await supabaseAdmin
@@ -13,7 +13,6 @@ router.get('/me', async (req: Request, res: Response) => {
       .select('*')
       .eq('id', req.user!.barbershopId)
       .single()
-
     if (error) throw error
     res.json(data)
   } catch (err: any) {
@@ -21,7 +20,7 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 })
 
-// PATCH /api/barbershops/settings — salva notification_settings e outros campos configuráveis
+// PATCH /api/barbershops/settings
 router.patch('/settings', async (req: Request, res: Response) => {
   try {
     const allowed = [
@@ -37,9 +36,10 @@ router.patch('/settings', async (req: Request, res: Response) => {
       'city',
       'state',
       'zip_code',
+      'meta_phone_id',
+      'meta_access_token',
     ]
 
-    // Filtra apenas campos permitidos
     const payload: Record<string, any> = {}
     for (const key of allowed) {
       if (key in req.body) payload[key] = req.body[key]
