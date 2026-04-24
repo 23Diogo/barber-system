@@ -8,8 +8,7 @@ import {
 } from '../services/notification.service'
 
 function daysBetween(from: Date, to: Date): number {
-  const diff = to.getTime() - from.getTime()
-  return Math.round(diff / 86_400_000)
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000)
 }
 
 export async function runBillsReminder(currentHour: number): Promise<void> {
@@ -18,7 +17,6 @@ export async function runBillsReminder(currentHour: number): Promise<void> {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  // Busca apenas barbearias ativas com WhatsApp e Meta configurados
   const { data: shops, error } = await supabaseAdmin
     .from('barbershops')
     .select('id, name, owner_name, whatsapp, notification_settings, meta_phone_id, meta_access_token')
@@ -34,13 +32,14 @@ export async function runBillsReminder(currentHour: number): Promise<void> {
   for (const shop of shops ?? []) {
     const settings = getSettings(shop)
 
-    // ── Filtro por hora configurada da barbearia ──────────────────────────────
-    const shopHour = Number(settings.daily_jobs_hour ?? 18)
-    if (shopHour !== currentHour) continue
+    // Filtro: notificação habilitada
+    if (!settings.bills_reminder_enabled) continue
+
+    // Filtro: hora configurada desta notificação para esta barbearia
+    if (Number(settings.bills_reminder_hour ?? 9) !== currentHour) continue
 
     const reminderDays: number[] = settings.bills_reminder_days ?? [5, 3, 1, 0]
 
-    // Busca contas a pagar pendentes desta barbearia
     const { data: bills, error: billsError } = await supabaseAdmin
       .from('bills')
       .select('id, description, amount, due_date')
@@ -49,19 +48,16 @@ export async function runBillsReminder(currentHour: number): Promise<void> {
       .is('paid_at', null)
 
     if (billsError) {
-      console.error(`❌ [bills-reminder] erro ao buscar bills da barbearia ${shop.id}:`, billsError.message)
+      console.error(`❌ [bills-reminder] barbearia ${shop.id}:`, billsError.message)
       continue
     }
 
     for (const bill of bills ?? []) {
       const dueDate = new Date(bill.due_date)
       dueDate.setHours(0, 0, 0, 0)
-
       const daysUntil = daysBetween(today, dueDate)
 
-      // Ignora se já venceu ou se o dia não está na lista de lembretes
-      if (daysUntil < 0) continue
-      if (!reminderDays.includes(daysUntil)) continue
+      if (daysUntil < 0 || !reminderDays.includes(daysUntil)) continue
 
       const message = tplBillsReminder({
         ownerName:   shop.owner_name || 'Proprietário',
