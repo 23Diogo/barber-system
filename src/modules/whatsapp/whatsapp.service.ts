@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../../config/supabase'
 
 export const whatsappService = {
 
+  // ─── Mensagem de texto livre (janela de 24h) ───────────────────────────────
   async sendMessage(phoneNumberId: string, accessToken: string, to: string, body: string) {
     try {
       await axios.post(
@@ -12,6 +13,67 @@ export const whatsappService = {
       )
     } catch (err: any) {
       console.error('❌ WA send error:', err.response?.data || err.message)
+      throw err
+    }
+  },
+
+  // ─── Template hello_world (teste — sem variáveis) ──────────────────────────
+  async sendHelloWorld(phoneNumberId: string, accessToken: string, to: string) {
+    try {
+      await axios.post(
+        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: to.replace(/\D/g, ''),
+          type: 'template',
+          template: {
+            name: 'hello_world',
+            language: { code: 'en_US' },
+          },
+        },
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      )
+    } catch (err: any) {
+      console.error('❌ WA hello_world error:', err.response?.data || err.message)
+      throw err
+    }
+  },
+
+  // ─── Template barberflow_notificacao (3 variáveis: nome, barbearia, msg) ──
+  // Usar após aprovação do template na Meta
+  async sendNotificationTemplate(
+    phoneNumberId: string,
+    accessToken: string,
+    to: string,
+    params: { nome: string; barbearia: string; mensagem: string }
+  ) {
+    try {
+      await axios.post(
+        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: to.replace(/\D/g, ''),
+          type: 'template',
+          template: {
+            name: 'barberflow_notificacao',
+            language: { code: 'pt_BR' },
+            components: [
+              {
+                type: 'body',
+                parameters: [
+                  { type: 'text', text: params.nome },
+                  { type: 'text', text: params.barbearia },
+                  { type: 'text', text: params.mensagem },
+                ],
+              },
+            ],
+          },
+        },
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      )
+    } catch (err: any) {
+      console.error('❌ WA template error:', err.response?.data || err.message)
+      throw err
     }
   },
 
@@ -98,12 +160,10 @@ export const whatsappService = {
 
       if (!shop) return
 
-      // Respeita a configuração do dono
       const settings = shop.notification_settings || {}
-      const alertEnabled = settings.new_client_alert !== false // default true
+      const alertEnabled = settings.new_client_alert !== false
       if (!alertEnabled) return
 
-      // Precisa do WhatsApp do dono e do bot configurado
       const ownerPhone = String(shop.whatsapp || '').replace(/\D/g, '')
       if (!ownerPhone || ownerPhone.length < 10) return
       if (!shop.meta_phone_id || !shop.meta_access_token) return
