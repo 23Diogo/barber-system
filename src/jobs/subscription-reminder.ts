@@ -8,8 +8,7 @@ import {
 } from '../services/notification.service'
 
 function daysBetween(from: Date, to: Date): number {
-  const diff = to.getTime() - from.getTime()
-  return Math.round(diff / 86_400_000)
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000)
 }
 
 export async function runSubscriptionReminder(currentHour: number): Promise<void> {
@@ -34,22 +33,20 @@ export async function runSubscriptionReminder(currentHour: number): Promise<void
   for (const shop of shops ?? []) {
     const settings = getSettings(shop)
 
-    // ── Filtro por hora configurada da barbearia ──────────────────────────────
-    const shopHour = Number(settings.daily_jobs_hour ?? 18)
-    if (shopHour !== currentHour) continue
+    // Filtro: notificação habilitada
+    if (!settings.subscription_reminder_enabled) continue
+
+    // Filtro: hora configurada desta notificação para esta barbearia
+    if (Number(settings.subscription_reminder_hour ?? 9) !== currentHour) continue
 
     const reminderDays: number[] = settings.subscription_reminder_days ?? [5, 3, 1, 0]
 
     const subEnd = new Date(shop.subscription_end)
     subEnd.setHours(0, 0, 0, 0)
-
     const daysUntil = daysBetween(today, subEnd)
 
-    // Ignora se já venceu ou se o dia não está na lista de lembretes
-    if (daysUntil < 0) continue
-    if (!reminderDays.includes(daysUntil)) continue
+    if (daysUntil < 0 || !reminderDays.includes(daysUntil)) continue
 
-    // Busca nome e valor do plano
     let planName = 'BarberFlow'
     let amount   = 'R$ 0,00'
 
@@ -59,7 +56,6 @@ export async function runSubscriptionReminder(currentHour: number): Promise<void
         .select('name, price')
         .eq('id', shop.plan_id)
         .maybeSingle()
-
       if (plan) {
         planName = plan.name
         amount   = formatCurrencyBR(Number(plan.price || 0))
