@@ -1,208 +1,241 @@
-// CORRETO
+// src/modules/barbershops/test-notifications.routes.ts
+// ⚠️  REMOVER ANTES DE IR PARA PRODUÇÃO — endpoints sem autenticação
+//
+// Registrar no app.ts:
+//   import testNotifRoutes from './modules/barbershops/test-notifications.routes'
+//   app.use('/api/test-notifications', testNotifRoutes)
+
+import { Router, Request, Response } from 'express'
 import { supabaseAdmin }    from '../../config/supabase'
+import { authenticate }     from '../../middleware/auth'
 import { whatsappService }  from '../whatsapp/whatsapp.service'
+import { runBillsReminder }          from '../../jobs/bills-reminder'
+import { runStockAlert }             from '../../jobs/stock-alert'
+import { runSubscriptionReminder }   from '../../jobs/subscription-reminder'
+import { runReactivation }           from '../../jobs/reactivation'
+import {
+  getSettings,
+  tplBillsReminder,
+  tplStockAlert,
+  tplSubscriptionReminder,
+  tplAppointmentConfirmed,
+  tplAppointmentReminder1h,
+  tplNewClient,
+  formatDateBR,
+  formatCurrencyBR,
+} from '../../services/notification.service'
 
+const router = Router()
 
-export type NotificationType =
-  | 'appointment_confirmed'
-  | 'appointment_cancelled'
-  | 'appointment_reminder_1h'
-  | 'bills_reminder'
-  | 'subscription_reminder'
-  | 'stock_alert'
-  | 'reactivation'
-  | 'new_client'
+// Todas as rotas de teste exigem autenticação normal
+// (assim você só testa para a SUA barbearia)
+router.use(authenticate)
 
-interface SendOptions {
-  barbershopId: string
-  type: NotificationType
-  referenceId: string
-  referenceDate?: string
-  recipientPhone: string
-  phoneNumberId: string
-  accessToken: string
-  message: string
+// ─── Helper: busca dados da barbearia do usuário logado ──────────────────────
+
+async function getShop(barbershopId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('barbershops')
+    .select('*')
+    .eq('id', barbershopId)
+    .single()
+  if (error || !data) throw new Error('Barbearia não encontrada.')
+  if (!data.meta_phone_id || !data.meta_access_token) {
+    throw new Error('WhatsApp Bot não configurado. Configure o Meta Phone ID nas configurações.')
+  }
+  if (!data.whatsapp) {
+    throw new Error('WhatsApp da barbearia não configurado.')
+  }
+  return data
 }
 
-async function alreadySent(opts: {
-  barbershopId: string
-  type: string
-  referenceId: string
-  referenceDate?: string
-  recipientPhone: string
-}): Promise<boolean> {
-  const { data } = await supabaseAdmin
-    .from('notification_logs')
-    .select('id')
-    .eq('barbershop_id', opts.barbershopId)
-    .eq('type', opts.type)
-    .eq('reference_id', opts.referenceId)
-    .eq('recipient_phone', opts.recipientPhone)
-    .eq('reference_date', opts.referenceDate ?? null)
-    .maybeSingle()
-  return !!data
-}
+// ─── POST /api/test-notifications/bills ──────────────────────────────────────
+// Envia um lembrete de conta a pagar de exemplo
 
-async function logNotification(opts: {
-  barbershopId: string
-  type: string
-  referenceId: string
-  referenceDate?: string
-  recipientPhone: string
-  status: 'sent' | 'failed'
-  errorMessage?: string
-}) {
-  await supabaseAdmin
-    .from('notification_logs')
-    .upsert(
-      {
-        barbershop_id:   opts.barbershopId,
-        type:            opts.type,
-        reference_id:    opts.referenceId,
-        reference_date:  opts.referenceDate ?? null,
-        recipient_phone: opts.recipientPhone,
-        status:          opts.status,
-        error_message:   opts.errorMessage ?? null,
-      },
-      {
-        onConflict:       'barbershop_id,type,reference_id,reference_date,recipient_phone',
-        ignoreDuplicates: true,
-      }
-    )
-}
-
-export async function sendNotification(opts: SendOptions): Promise<void> {
-  const already = await alreadySent({
-    barbershopId:   opts.barbershopId,
-    type:           opts.type,
-    referenceId:    opts.referenceId,
-    referenceDate:  opts.referenceDate,
-    recipientPhone: opts.recipientPhone,
-  })
-  if (already) return
-
+router.post('/bills', async (req: Request, res: Response) => {
   try {
-    await whatsappService.sendMessage(
-      opts.phoneNumberId,
-      opts.accessToken,
-      opts.recipientPhone,
-      opts.message,
-    )
-    await logNotification({ ...opts, status: 'sent' })
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
+
+    if (!settings.bills_reminder_enabled) {
+      return res.status(400).json({ error: 'Lembrete de contas está desativado nas configurações.' })
+    }
+
+    const message = tplBillsReminder({
+      ownerName:   shop.owner_name || 'Proprietário',
+      shopName:    shop.name,
+      description: 'Aluguel do espaço (TESTE)',
+      amount:      formatCurrencyBR(2500),
+      dueDate:     formatDateBR(new Date()),
+      daysUntil:   1,
+    })
+
+    await whatsappService.sendMessage(shop.meta_phone_id, shop.meta_access_token, shop.whatsapp, message)
+    return res.json({ ok: true, message: 'Lembrete de conta enviado!', sentTo: shop.whatsapp })
   } catch (err: any) {
-    await logNotification({ ...opts, status: 'failed', errorMessage: err?.message })
-    console.error(`❌ Notificação falhou [${opts.type}] ref=${opts.referenceId}:`, err?.message)
+    return res.status(400).json({ error: err.message })
   }
-}
+})
 
-// ─── Templates ────────────────────────────────────────────────────────────────
+// ─── POST /api/test-notifications/stock ──────────────────────────────────────
 
-export function tplAppointmentConfirmed(p: {
-  clientName: string; shopName: string; serviceName: string
-  barberName: string; date: string; time: string; slug: string
-}): string {
-  return `✅ *Agendamento confirmado!*\n\nOlá, ${p.clientName}! Seu agendamento na *${p.shopName}* foi confirmado.\n\n📋 *Serviço:* ${p.serviceName}\n💈 *Profissional:* ${p.barberName}\n📅 *Data:* ${p.date}\n🕐 *Horário:* ${p.time}\n\nPara cancelar ou reagendar acesse: https://bbarberflow.com.br/client/${p.slug}`
-}
+router.post('/stock', async (req: Request, res: Response) => {
+  try {
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
 
-export function tplAppointmentConfirmedBarber(p: {
-  barberName: string; clientName: string; serviceName: string; date: string; time: string
-}): string {
-  return `💈 *Novo agendamento!*\n\nOlá, ${p.barberName}! Você tem um novo agendamento.\n\n👤 *Cliente:* ${p.clientName}\n📋 *Serviço:* ${p.serviceName}\n📅 *Data:* ${p.date}\n🕐 *Horário:* ${p.time}`
-}
+    if (!settings.stock_alert_enabled) {
+      return res.status(400).json({ error: 'Alerta de estoque está desativado nas configurações.' })
+    }
 
-export function tplAppointmentCancelled(p: {
-  clientName: string; shopName: string; serviceName: string; date: string; time: string
-}): string {
-  return `❌ *Agendamento cancelado*\n\nOlá, ${p.clientName}. Seu agendamento na *${p.shopName}* foi cancelado.\n\n📋 *Serviço:* ${p.serviceName}\n📅 *Data:* ${p.date}\n🕐 *Horário:* ${p.time}\n\nPara reagendar, entre em contato conosco! 😊`
-}
+    const message = tplStockAlert({
+      ownerName: shop.owner_name || 'Proprietário',
+      shopName:  shop.name,
+      items: [
+        { name: 'Pomada Modeladora (TESTE)', current: 2,  min: 10, unit: 'un' },
+        { name: 'Lâmina Gillette (TESTE)',   current: 3,  min: 20, unit: 'pct' },
+        { name: 'Álcool 70% (TESTE)',        current: 0,  min: 3,  unit: 'L' },
+      ],
+    })
 
-export function tplAppointmentReminder1h(p: {
-  clientName: string; shopName: string; serviceName: string
-  barberName: string; time: string; address: string
-}): string {
-  return `⏰ *Lembrete de agendamento*\n\nOlá, ${p.clientName}! Daqui a 1 hora você tem um horário na *${p.shopName}*.\n\n💈 *Profissional:* ${p.barberName}\n📋 *Serviço:* ${p.serviceName}\n🕐 *Horário:* ${p.time}\n📍 *Endereço:* ${p.address}\n\nTe esperamos! 💇‍♂️`
-}
-
-export function tplBillsReminder(p: {
-  ownerName: string; shopName: string; description: string
-  amount: string; dueDate: string; daysUntil: number
-}): string {
-  const urgency = p.daysUntil === 0
-    ? '🚨 *VENCE HOJE!*'
-    : p.daysUntil === 1
-      ? '⚠️ *Vence amanhã!*'
-      : `📅 Vence em *${p.daysUntil} dias*`
-  return `💳 *Lembrete de conta a pagar*\n\nOlá, ${p.ownerName}! ${urgency}\n\n🏪 *Barbearia:* ${p.shopName}\n📋 *Descrição:* ${p.description}\n💰 *Valor:* ${p.amount}\n📅 *Vencimento:* ${p.dueDate}\n\nAcesse o painel para registrar o pagamento.`
-}
-
-export function tplSubscriptionReminder(p: {
-  ownerName: string; shopName: string; planName: string
-  amount: string; dueDate: string; daysUntil: number
-}): string {
-  const urgency = p.daysUntil === 0
-    ? '🚨 *SUA MENSALIDADE VENCE HOJE!*'
-    : p.daysUntil === 1
-      ? '⚠️ *Sua mensalidade vence amanhã!*'
-      : `📅 Sua mensalidade vence em *${p.daysUntil} dias*`
-  return `🔔 *BarberFlow — Aviso de vencimento*\n\nOlá, ${p.ownerName}! ${urgency}\n\n🏪 *Barbearia:* ${p.shopName}\n📦 *Plano:* ${p.planName}\n💰 *Valor:* ${p.amount}\n📅 *Vencimento:* ${p.dueDate}\n\nPara manter seu sistema ativo, efetue o pagamento pelo link:\n👉 https://bbarberflow.com.br/planos`
-}
-
-export function tplStockAlert(p: {
-  ownerName: string; shopName: string
-  items: Array<{ name: string; current: number; min: number; unit: string }>
-}): string {
-  const list = p.items.map(i => `  • ${i.name}: ${i.current} ${i.unit} (mín: ${i.min} ${i.unit})`).join('\n')
-  return `📦 *Alerta de estoque baixo — ${p.shopName}*\n\nOlá, ${p.ownerName}! Os itens abaixo estão abaixo do estoque mínimo:\n\n${list}\n\nAcesse o painel de estoque para reabastecer.`
-}
-
-export function tplNewClient(p: {
-  ownerName: string; shopName: string; clientName: string; clientPhone: string
-}): string {
-  return `🎉 *Novo cliente cadastrado!*\n\nOlá, ${p.ownerName}! Um novo cliente acabou de se cadastrar na *${p.shopName}*.\n\n👤 *Nome:* ${p.clientName}\n📱 *Telefone:* ${p.clientPhone}\n\nAcesse o painel de clientes para ver o perfil completo.`
-}
-
-export function formatDateBR(value: string | Date): string {
-  return new Date(value).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-}
-
-export function formatTimeBR(value: string | Date): string {
-  return new Date(value).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
-}
-
-export function formatCurrencyBR(value: number): string {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
-}
-
-// ─── getSettings — defaults completos por notificação ────────────────────────
-
-export function getSettings(shop: any) {
-  const defaults = {
-    // Agendamentos (disparo imediato — sem hora configurável)
-    appointment_confirmed:         true,
-    appointment_cancelled:         true,
-    appointment_reminder_1h:       true,
-
-    // Contas a pagar
-    bills_reminder_enabled:        true,
-    bills_reminder_days:           [5, 3, 1, 0],
-    bills_reminder_hour:           9,
-
-    // Mensalidade do sistema
-    subscription_reminder_enabled: true,
-    subscription_reminder_days:    [5, 3, 1, 0],
-    subscription_reminder_hour:    9,
-
-    // Estoque baixo
-    stock_alert_enabled:           true,
-    stock_alert_hour:              8,
-
-    // Reativação de clientes inativos
-    reactivation_enabled:          true,
-    reactivation_hour:             10,
-    reactivation_message:          '',
-
-    // Novo cliente cadastrado via portal
-    new_client_alert:              true,
+    await whatsappService.sendMessage(shop.meta_phone_id, shop.meta_access_token, shop.whatsapp, message)
+    return res.json({ ok: true, message: 'Alerta de estoque enviado!', sentTo: shop.whatsapp })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
   }
-  return { ...defaults, ...(shop.notification_settings || {}) }
-}
+})
+
+// ─── POST /api/test-notifications/subscription ───────────────────────────────
+
+router.post('/subscription', async (req: Request, res: Response) => {
+  try {
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
+
+    if (!settings.subscription_reminder_enabled) {
+      return res.status(400).json({ error: 'Lembrete de mensalidade está desativado nas configurações.' })
+    }
+
+    const message = tplSubscriptionReminder({
+      ownerName: shop.owner_name || 'Proprietário',
+      shopName:  shop.name,
+      planName:  'Plano PRO (TESTE)',
+      amount:    formatCurrencyBR(299),
+      dueDate:   formatDateBR(new Date(Date.now() + 3 * 86_400_000)),
+      daysUntil: 3,
+    })
+
+    await whatsappService.sendMessage(shop.meta_phone_id, shop.meta_access_token, shop.whatsapp, message)
+    return res.json({ ok: true, message: 'Lembrete de mensalidade enviado!', sentTo: shop.whatsapp })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+
+// ─── POST /api/test-notifications/appointment-confirmed ──────────────────────
+
+router.post('/appointment-confirmed', async (req: Request, res: Response) => {
+  try {
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
+
+    if (!settings.appointment_confirmed) {
+      return res.status(400).json({ error: 'Confirmação de agendamento está desativada nas configurações.' })
+    }
+
+    const message = tplAppointmentConfirmed({
+      clientName:  'Diogo (TESTE)',
+      shopName:    shop.name,
+      serviceName: 'Corte + Barba',
+      barberName:  'Juca',
+      date:        formatDateBR(new Date()),
+      time:        '14:30',
+      slug:        shop.slug || shop.id,
+    })
+
+    await whatsappService.sendMessage(shop.meta_phone_id, shop.meta_access_token, shop.whatsapp, message)
+    return res.json({ ok: true, message: 'Confirmação de agendamento enviada!', sentTo: shop.whatsapp })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+
+// ─── POST /api/test-notifications/appointment-reminder ───────────────────────
+
+router.post('/appointment-reminder', async (req: Request, res: Response) => {
+  try {
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
+
+    if (!settings.appointment_reminder_1h) {
+      return res.status(400).json({ error: 'Lembrete 1h antes está desativado nas configurações.' })
+    }
+
+    const message = tplAppointmentReminder1h({
+      clientName:  'Diogo (TESTE)',
+      shopName:    shop.name,
+      serviceName: 'Corte + Barba',
+      barberName:  'Juca',
+      time:        '14:30',
+      address:     shop.address || 'Consulte o endereço no aplicativo',
+    })
+
+    await whatsappService.sendMessage(shop.meta_phone_id, shop.meta_access_token, shop.whatsapp, message)
+    return res.json({ ok: true, message: 'Lembrete 1h enviado!', sentTo: shop.whatsapp })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+
+// ─── POST /api/test-notifications/new-client ─────────────────────────────────
+
+router.post('/new-client', async (req: Request, res: Response) => {
+  try {
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
+
+    if (!settings.new_client_alert) {
+      return res.status(400).json({ error: 'Alerta de novo cliente está desativado nas configurações.' })
+    }
+
+    const message = tplNewClient({
+      ownerName:   shop.owner_name || 'Proprietário',
+      shopName:    shop.name,
+      clientName:  'Carlos Silva (TESTE)',
+      clientPhone: '5511999990000',
+    })
+
+    await whatsappService.sendMessage(shop.meta_phone_id, shop.meta_access_token, shop.whatsapp, message)
+    return res.json({ ok: true, message: 'Alerta de novo cliente enviado!', sentTo: shop.whatsapp })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+
+// ─── POST /api/test-notifications/reactivation ───────────────────────────────
+
+router.post('/reactivation', async (req: Request, res: Response) => {
+  try {
+    const shop = await getShop(req.user!.barbershopId)
+    const settings = getSettings(shop)
+
+    if (!settings.reactivation_enabled) {
+      return res.status(400).json({ error: 'Reativação de clientes está desativada nas configurações.' })
+    }
+
+    const { sent, skipped } = await runReactivation(shop.id)
+
+    if (sent === 0 && skipped === 0) {
+      return res.json({ ok: true, message: 'Nenhum cliente inativo encontrado (30–60 dias) para esta barbearia.' })
+    }
+
+    return res.json({
+      ok: true,
+      message: `Reativação executada! Enviados: ${sent} | Ignorados/já enviado hoje: ${skipped}`,
+    })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+
+export default router
