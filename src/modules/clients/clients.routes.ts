@@ -13,11 +13,9 @@ const list = async (req: Request, res: Response) => {
       .eq('barbershop_id', req.user!.barbershopId)
       .eq('is_active', true)
       .order('name')
-
     if (q)        query = query.ilike('name', `%${q}%`)
     if (vip)      query = query.eq('is_vip', true)
     if (inactive) query = query.lt('last_visit_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-
     const { data, error } = await query
     if (error) throw error
     res.json(data)
@@ -79,11 +77,46 @@ const addStyleHistory = async (req: Request, res: Response) => {
   } catch (err: any) { res.status(400).json({ error: err.message }) }
 }
 
+// ─── GET /api/clients/new-count?since=ISO_DATE ────────────────────────────────
+// Retorna quantos clientes foram criados após a data informada.
+// Usado pelo badge da sidebar para alertar o dono sobre novos cadastros via portal.
+
+const newCount = async (req: Request, res: Response) => {
+  try {
+    const { since } = req.query
+
+    if (!since || typeof since !== 'string') {
+      return res.status(400).json({ error: 'Parâmetro "since" obrigatório (ISO date).' })
+    }
+
+    const sinceDate = new Date(since)
+    if (isNaN(sinceDate.getTime())) {
+      return res.status(400).json({ error: 'Parâmetro "since" inválido.' })
+    }
+
+    const { count, error } = await supabaseAdmin
+      .from('clients')
+      .select('*', { count: 'exact', head: true })
+      .eq('barbershop_id', req.user!.barbershopId)
+      .gt('created_at', sinceDate.toISOString())
+
+    if (error) throw error
+
+    return res.json({ count: count ?? 0 })
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+}
+
 const router = Router()
 router.use(authenticate, checkLicense)
-router.get('/',                  list)
-router.get('/:id',               getOne)
-router.post('/',                 create)
-router.patch('/:id',             update)
-router.post('/:id/style-history',addStyleHistory)
+
+// IMPORTANTE: /new-count antes de /:id para não ser capturado como parâmetro
+router.get('/new-count',          newCount)
+router.get('/',                   list)
+router.get('/:id',                getOne)
+router.post('/',                  create)
+router.patch('/:id',              update)
+router.post('/:id/style-history', addStyleHistory)
+
 export default router
