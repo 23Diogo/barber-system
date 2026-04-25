@@ -25,7 +25,7 @@ import paymentsRoutes      from './modules/payments/payments.routes'
 import mercadoPagoRoutes   from './modules/mercadopago/mercadopago.routes'
 import reviewsRoutes       from './modules/reviews/reviews.routes'
 import invitesRouter       from './modules/barbershops/invites.routes'
-
+import barberAuthRoutes    from './modules/barbers/barber-auth.routes' 
 
 import testNotifRoutes     from './modules/barbershops/test-notifications.routes'
 
@@ -97,7 +97,7 @@ app.use('/api/payments',      paymentsRoutes)
 app.use('/api/mercadopago',   mercadoPagoRoutes)
 app.use('/api/reviews',       reviewsRoutes)
 app.use('/api/barbershops',   invitesRouter)
-
+app.use('/api/barber-auth',   barberAuthRoutes)
 
 app.use('/api/test-notifications', testNotifRoutes)
 
