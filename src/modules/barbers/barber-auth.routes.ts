@@ -176,7 +176,7 @@ router.get('/appointments', async (req: Request, res: Response) => {
       .select(`
         id, scheduled_at, status, final_price, notes,
         services(id, name, duration_min, price),
-        clients(id, name, phone, whatsapp, avatar_url)
+        clients(id, name, phone, whatsapp)
       `)
       .eq('barbershop_id', decoded.barbershopId)
       .eq('barber_id', decoded.barberId)
