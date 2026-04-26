@@ -176,11 +176,10 @@ router.get('/appointments', async (req: Request, res: Response) => {
       .select(`
         id, scheduled_at, status, final_price, notes,
         services(id, name, duration_min, price),
-        clients(id, name, phone, whatsapp, avatar_url),
-        barber_profiles!inner(id, user_id)
+        clients(id, name, phone, whatsapp, avatar_url)
       `)
       .eq('barbershop_id', decoded.barbershopId)
-      .eq('barber_profiles.user_id', decoded.userId)
+      .eq('barber_id', decoded.barberId)
       .gte('scheduled_at', from.toISOString())
       .lte('scheduled_at', to.toISOString())
       .order('scheduled_at', { ascending: true })
