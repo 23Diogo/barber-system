@@ -132,23 +132,16 @@ router.get('/appointments', async (req: Request, res: Response) => {
     const baseDate = date ? new Date(String(date)) : new Date()
     baseDate.setHours(0, 0, 0, 0)
 
-    let from: Date
-    let to: Date
-
+    let from: Date, to: Date
     if (period === 'week') {
       const day = baseDate.getDay()
-      from = new Date(baseDate)
-      from.setDate(baseDate.getDate() - day)
-      to = new Date(from)
-      to.setDate(from.getDate() + 6)
-      to.setHours(23, 59, 59, 999)
+      from = new Date(baseDate); from.setDate(baseDate.getDate() - day)
+      to = new Date(from); to.setDate(from.getDate() + 6); to.setHours(23, 59, 59, 999)
     } else if (period === 'month') {
       from = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1)
       to   = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0, 23, 59, 59, 999)
     } else {
-      from = new Date(baseDate)
-      to   = new Date(baseDate)
-      to.setHours(23, 59, 59, 999)
+      from = new Date(baseDate); to = new Date(baseDate); to.setHours(23, 59, 59, 999)
     }
 
     const { data, error } = await supabaseAdmin
@@ -156,7 +149,13 @@ router.get('/appointments', async (req: Request, res: Response) => {
       .select(`
         id, scheduled_at, status, final_price, notes,
         services(id, name, duration_min, price),
-        clients(id, name, phone, whatsapp)
+        clients(
+          id, name, phone, whatsapp, email,
+          birthdate, gender, photo_url,
+          hair_style, beard_style, preferences, notes,
+          total_visits, total_spent, last_visit_at,
+          avg_days_between_visits, is_vip, loyalty_points
+        )
       `)
       .eq('barbershop_id', decoded.barbershopId)
       .eq('barber_id', decoded.barberId)
