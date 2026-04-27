@@ -1,10 +1,4 @@
 // src/modules/barbers/barber-auth.routes.ts
-// Login exclusivo para barbeiros no app mobile
-//
-// POST  /api/barber-auth/login          → retorna token + perfil do barbeiro
-// GET   /api/barber-auth/me             → retorna dados do barbeiro logado
-// GET   /api/barber-auth/appointments   → retorna agendamentos do barbeiro
-// PATCH /api/barber-auth/availability   → atualiza disponibilidade do barbeiro
 
 import { Router, Request, Response } from 'express'
 import { supabaseAdmin } from '../../config/supabase'
@@ -17,62 +11,42 @@ const JWT_SECRET = process.env.JWT_SECRET || 'barberflow-secret'
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body
-
     if (!email || !password) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios.' })
     }
-
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('id, name, email, phone, avatar_url, role, barbershop_id, password_hash')
       .eq('email', email.toLowerCase().trim())
       .eq('role', 'barber')
       .single()
-
     if (userError || !user) {
       return res.status(401).json({ error: 'Email ou senha inválidos.' })
     }
-
     const bcrypt = require('bcryptjs')
     const valid  = await bcrypt.compare(password, user.password_hash || '')
     if (!valid) {
       return res.status(401).json({ error: 'Email ou senha inválidos.' })
     }
-
     const { data: profile } = await supabaseAdmin
       .from('barber_profiles')
       .select('id, commission_type, commission_value, specialties, bio, is_accepting, working_hours')
       .eq('user_id', user.id)
       .eq('barbershop_id', user.barbershop_id)
       .single()
-
     const { data: shop } = await supabaseAdmin
       .from('barbershops')
       .select('id, name, slug, address, whatsapp')
       .eq('id', user.barbershop_id)
       .single()
-
     const token = jwt.sign(
-      {
-        userId:       user.id,
-        barbershopId: user.barbershop_id,
-        barberId:     profile?.id,
-        role:         'barber',
-      },
+      { userId: user.id, barbershopId: user.barbershop_id, barberId: profile?.id, role: 'barber' },
       JWT_SECRET,
       { expiresIn: '30d' }
     )
-
     return res.json({
       token,
-      user: {
-        id:         user.id,
-        name:       user.name,
-        email:      user.email,
-        phone:      user.phone,
-        avatar_url: user.avatar_url,
-        role:       user.role,
-      },
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar_url: user.avatar_url, role: user.role },
       profile,
       barbershop: shop,
     })
@@ -88,32 +62,26 @@ router.get('/me', async (req: Request, res: Response) => {
     if (!authHeader?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Token não informado.' })
     }
-
     const token   = authHeader.split(' ')[1]
     const decoded = jwt.verify(token, JWT_SECRET) as any
-
     if (decoded.role !== 'barber') {
       return res.status(403).json({ error: 'Acesso negado.' })
     }
-
     const { data: user } = await supabaseAdmin
       .from('users')
       .select('id, name, email, phone, avatar_url, role, barbershop_id')
       .eq('id', decoded.userId)
       .single()
-
     const { data: profile } = await supabaseAdmin
       .from('barber_profiles')
       .select('id, commission_type, commission_value, specialties, bio, is_accepting, working_hours')
       .eq('user_id', decoded.userId)
       .single()
-
     const { data: shop } = await supabaseAdmin
       .from('barbershops')
       .select('id, name, slug, address, whatsapp')
       .eq('id', decoded.barbershopId)
       .single()
-
     return res.json({ user, profile, barbershop: shop })
   } catch (err: any) {
     return res.status(401).json({ error: 'Token inválido.' })
@@ -127,26 +95,20 @@ router.patch('/availability', async (req: Request, res: Response) => {
     if (!authHeader?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Token não informado.' })
     }
-
     const token   = authHeader.split(' ')[1]
     const decoded = jwt.verify(token, JWT_SECRET) as any
-
     if (decoded.role !== 'barber') {
       return res.status(403).json({ error: 'Acesso negado.' })
     }
-
     const { is_accepting } = req.body
     if (typeof is_accepting !== 'boolean') {
-      return res.status(400).json({ error: 'Campo is_accepting é obrigatório e deve ser boolean.' })
+      return res.status(400).json({ error: 'Campo is_accepting deve ser boolean.' })
     }
-
     const { error } = await supabaseAdmin
       .from('barber_profiles')
       .update({ is_accepting })
       .eq('user_id', decoded.userId)
-
     if (error) throw error
-
     return res.json({ success: true, is_accepting })
   } catch (err: any) {
     return res.status(500).json({ error: err.message })
@@ -160,10 +122,8 @@ router.get('/appointments', async (req: Request, res: Response) => {
     if (!authHeader?.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Token não informado.' })
     }
-
     const token   = authHeader.split(' ')[1]
     const decoded = jwt.verify(token, JWT_SECRET) as any
-
     if (decoded.role !== 'barber') {
       return res.status(403).json({ error: 'Acesso negado.' })
     }
@@ -191,16 +151,12 @@ router.get('/appointments', async (req: Request, res: Response) => {
       to.setHours(23, 59, 59, 999)
     }
 
-    const { data: appointments, error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('appointments')
       .select(`
         id, scheduled_at, status, final_price, notes,
         services(id, name, duration_min, price),
-        clients(
-          id, name, phone, whatsapp,
-          cut_preference, notes,
-          total_visits, last_visit
-        )
+        clients(id, name, phone, whatsapp)
       `)
       .eq('barbershop_id', decoded.barbershopId)
       .eq('barber_id', decoded.barberId)
@@ -210,31 +166,7 @@ router.get('/appointments', async (req: Request, res: Response) => {
 
     if (error) throw error
 
-    // Busca plano ativo para cada cliente
-    const enriched = await Promise.all(
-      (appointments || []).map(async (apt: any) => {
-        if (!apt.clients?.id) return apt
-
-        const { data: activePlan } = await supabaseAdmin
-          .from('client_plans')
-          .select('id, name, remaining_cuts, expires_at, status')
-          .eq('client_id', apt.clients.id)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single()
-
-        return {
-          ...apt,
-          clients: {
-            ...apt.clients,
-            active_plan: activePlan || null,
-          },
-        }
-      })
-    )
-
-    return res.json(enriched)
+    return res.json(data)
   } catch (err: any) {
     return res.status(400).json({ error: err.message })
   }
