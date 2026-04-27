@@ -1,12 +1,10 @@
 // src/modules/barbers/barber-auth.routes.ts
 // Login exclusivo para barbeiros no app mobile
 //
-// POST /api/barber-auth/login   → retorna token + perfil do barbeiro
-// GET  /api/barber-auth/me      → retorna dados do barbeiro logado
-//
-// Registrar no app.ts:
-//   import barberAuthRoutes from './modules/barbers/barber-auth.routes'
-//   app.use('/api/barber-auth', barberAuthRoutes)
+// POST  /api/barber-auth/login          → retorna token + perfil do barbeiro
+// GET   /api/barber-auth/me             → retorna dados do barbeiro logado
+// GET   /api/barber-auth/appointments   → retorna agendamentos do barbeiro
+// PATCH /api/barber-auth/availability   → atualiza disponibilidade do barbeiro
 
 import { Router, Request, Response } from 'express'
 import { supabaseAdmin } from '../../config/supabase'
@@ -16,8 +14,6 @@ const router = Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'barberflow-secret'
 
 // ─── POST /api/barber-auth/login ─────────────────────────────────────────────
-// Body: { email: string, password: string }
-
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body
@@ -26,7 +22,6 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Email e senha são obrigatórios.' })
     }
 
-    // Busca usuário com role barber
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select('id, name, email, phone, avatar_url, role, barbershop_id, password_hash')
@@ -38,14 +33,12 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Email ou senha inválidos.' })
     }
 
-    // Valida senha — usa bcrypt igual ao auth do dono
     const bcrypt = require('bcryptjs')
     const valid  = await bcrypt.compare(password, user.password_hash || '')
     if (!valid) {
       return res.status(401).json({ error: 'Email ou senha inválidos.' })
     }
 
-    // Busca perfil do barbeiro
     const { data: profile } = await supabaseAdmin
       .from('barber_profiles')
       .select('id, commission_type, commission_value, specialties, bio, is_accepting, working_hours')
@@ -53,14 +46,12 @@ router.post('/login', async (req: Request, res: Response) => {
       .eq('barbershop_id', user.barbershop_id)
       .single()
 
-    // Busca dados da barbearia
     const { data: shop } = await supabaseAdmin
       .from('barbershops')
       .select('id, name, slug, address, whatsapp')
       .eq('id', user.barbershop_id)
       .single()
 
-    // Gera token JWT
     const token = jwt.sign(
       {
         userId:       user.id,
@@ -91,7 +82,6 @@ router.post('/login', async (req: Request, res: Response) => {
 })
 
 // ─── GET /api/barber-auth/me ──────────────────────────────────────────────────
-
 router.get('/me', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization
@@ -130,9 +120,40 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 })
 
-// ─── GET /api/barber-auth/appointments ───────────────────────────────────────
-// Query params: ?period=day|week|month&date=2026-04-25
+// ─── PATCH /api/barber-auth/availability ─────────────────────────────────────
+router.patch('/availability', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Token não informado.' })
+    }
 
+    const token   = authHeader.split(' ')[1]
+    const decoded = jwt.verify(token, JWT_SECRET) as any
+
+    if (decoded.role !== 'barber') {
+      return res.status(403).json({ error: 'Acesso negado.' })
+    }
+
+    const { is_accepting } = req.body
+    if (typeof is_accepting !== 'boolean') {
+      return res.status(400).json({ error: 'Campo is_accepting é obrigatório e deve ser boolean.' })
+    }
+
+    const { error } = await supabaseAdmin
+      .from('barber_profiles')
+      .update({ is_accepting })
+      .eq('user_id', decoded.userId)
+
+    if (error) throw error
+
+    return res.json({ success: true, is_accepting })
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── GET /api/barber-auth/appointments ───────────────────────────────────────
 router.get('/appointments', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization
@@ -165,18 +186,21 @@ router.get('/appointments', async (req: Request, res: Response) => {
       from = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1)
       to   = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0, 23, 59, 59, 999)
     } else {
-      // day
       from = new Date(baseDate)
       to   = new Date(baseDate)
       to.setHours(23, 59, 59, 999)
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data: appointments, error } = await supabaseAdmin
       .from('appointments')
       .select(`
         id, scheduled_at, status, final_price, notes,
         services(id, name, duration_min, price),
-        clients(id, name, phone, whatsapp)
+        clients(
+          id, name, phone, whatsapp,
+          cut_preference, notes,
+          total_visits, last_visit
+        )
       `)
       .eq('barbershop_id', decoded.barbershopId)
       .eq('barber_id', decoded.barberId)
@@ -186,7 +210,31 @@ router.get('/appointments', async (req: Request, res: Response) => {
 
     if (error) throw error
 
-    return res.json(data)
+    // Busca plano ativo para cada cliente
+    const enriched = await Promise.all(
+      (appointments || []).map(async (apt: any) => {
+        if (!apt.clients?.id) return apt
+
+        const { data: activePlan } = await supabaseAdmin
+          .from('client_plans')
+          .select('id, name, remaining_cuts, expires_at, status')
+          .eq('client_id', apt.clients.id)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        return {
+          ...apt,
+          clients: {
+            ...apt.clients,
+            active_plan: activePlan || null,
+          },
+        }
+      })
+    )
+
+    return res.json(enriched)
   } catch (err: any) {
     return res.status(400).json({ error: err.message })
   }
