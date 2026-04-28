@@ -47,6 +47,10 @@ export async function createMercadoPagoPreference({
       external_reference: externalReference || undefined,
       payer: payerEmail ? { email: payerEmail } : undefined,
       metadata: metadata || undefined,
+      payment_methods: {
+        excluded_payment_types: [],
+        installments: 1,
+      },
       back_urls: {
         success: successUrl || buildFrontUrl('/client/assinatura/'),
         failure: failureUrl || buildFrontUrl('/client/assinatura/'),
