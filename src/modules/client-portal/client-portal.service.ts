@@ -115,10 +115,7 @@ function inferConsumptionType(service: any): ConsumptionType {
 
   if (!raw) return null
 
-  if (
-    raw.includes('barba') ||
-    raw.includes('beard')
-  ) {
+  if (raw.includes('barba') || raw.includes('beard')) {
     return 'beard'
   }
 
@@ -155,7 +152,6 @@ function getServiceCoverage(service: any, subscription: any) {
 
   if (explicitBalance) {
     const remaining = Number(explicitBalance.remaining_quantity || 0)
-
     return {
       includedInPlan: remaining > 0,
       consumedType: 'service' as ConsumptionType,
@@ -169,7 +165,6 @@ function getServiceCoverage(service: any, subscription: any) {
 
   if (inferredType === 'haircut') {
     const remaining = Number(currentCycle.remaining_haircuts || 0)
-
     return {
       includedInPlan: remaining > 0,
       consumedType: remaining > 0 ? 'haircut' : null,
@@ -181,7 +176,6 @@ function getServiceCoverage(service: any, subscription: any) {
 
   if (inferredType === 'beard') {
     const remaining = Number(currentCycle.remaining_beards || 0)
-
     return {
       includedInPlan: remaining > 0,
       consumedType: remaining > 0 ? 'beard' : null,
@@ -265,10 +259,7 @@ async function getServiceOrFail(barbershopId: string, serviceId: string) {
     .eq('is_active', true)
     .single()
 
-  if (error || !data) {
-    throw new Error('Serviço não encontrado')
-  }
-
+  if (error || !data) throw new Error('Serviço não encontrado')
   return data
 }
 
@@ -292,9 +283,7 @@ async function getBarberOrFail(barbershopId: string, barberId: string) {
     .eq('barbershop_id', barbershopId)
     .single()
 
-  if (error || !data) {
-    throw new Error('Profissional não encontrado')
-  }
+  if (error || !data) throw new Error('Profissional não encontrado')
 
   if (data.is_accepting === false) {
     throw new Error('Este profissional não está aceitando agendamentos no momento')
@@ -321,10 +310,7 @@ async function validateBarberServiceRelation(barberId: string, serviceId: string
     throw new Error('Este profissional não atende o serviço selecionado')
   }
 
-  return {
-    hasExplicitMapping: true,
-    mapping,
-  }
+  return { hasExplicitMapping: true, mapping }
 }
 
 function pickLatestInvoice(subscription: any) {
@@ -448,7 +434,6 @@ export const clientPortalService = {
 
     const services = (data || []).map((service: any) => {
       const coverage = getServiceCoverage(service, subscription)
-
       return {
         ...service,
         includedInPlan: coverage.includedInPlan,
@@ -550,7 +535,6 @@ export const clientPortalService = {
         })
         .map((barber: any) => {
           const mapping = mappingByBarberId.get(barber.id)
-
           return {
             ...barber,
             user: getUserObject(barber.users),
@@ -595,10 +579,7 @@ export const clientPortalService = {
       date
     )
 
-    return {
-      date,
-      slots,
-    }
+    return { date, slots }
   },
 
   async createAppointment(auth: ClientAuthPayload, body: CreatePortalAppointmentInput) {
@@ -755,7 +736,6 @@ export const clientPortalService = {
     const upcoming = items.filter((item: any) => {
       const scheduledAt = item?.scheduled_at ? new Date(item.scheduled_at) : null
       if (!scheduledAt || Number.isNaN(scheduledAt.getTime())) return false
-
       return (
         scheduledAt >= now &&
         !['cancelled', 'completed'].includes(String(item.status || ''))
@@ -764,10 +744,7 @@ export const clientPortalService = {
 
     const history = items.filter((item: any) => !upcoming.some((up: any) => up.id === item.id))
 
-    return {
-      upcoming,
-      history,
-    }
+    return { upcoming, history }
   },
 
   async cancelAppointment(auth: ClientAuthPayload, appointmentId: string, reason?: string) {
@@ -835,6 +812,7 @@ export const clientPortalService = {
 
     return data
   },
+
   async listPlans(auth: ClientAuthPayload) {
     const activeSubscription = await subscriptionsService.getActiveByClient(
       auth.clientId,
@@ -876,11 +854,7 @@ export const clientPortalService = {
     )
 
     if (!subscription) {
-      return {
-        subscription: null,
-        currentCycle: null,
-        latestInvoice: null,
-      }
+      return { subscription: null, currentCycle: null, latestInvoice: null }
     }
 
     return {
@@ -890,11 +864,9 @@ export const clientPortalService = {
     }
   },
 
-    async createSubscriptionCheckout(auth: ClientAuthPayload, body: any) {
+  async createSubscriptionCheckout(auth: ClientAuthPayload, body: any) {
     const planId = normalizeText(body?.planId)
-    if (!planId) {
-      throw new Error('planId é obrigatório')
-    }
+    if (!planId) throw new Error('planId é obrigatório')
 
     const [barbershop, client] = await Promise.all([
       getBarbershopSettings(auth.barbershopId),
@@ -922,9 +894,7 @@ export const clientPortalService = {
       .eq('is_active', true)
       .single()
 
-    if (planError || !plan) {
-      throw new Error('Plano não encontrado')
-    }
+    if (planError || !plan) throw new Error('Plano não encontrado')
 
     await subscriptionsService.create(auth.barbershopId, {
       client_id: auth.clientId,
@@ -939,9 +909,7 @@ export const clientPortalService = {
       auth.barbershopId
     )
 
-    if (!subscription) {
-      throw new Error('Não foi possível criar a assinatura')
-    }
+    if (!subscription) throw new Error('Não foi possível criar a assinatura')
 
     const currentCycle = pickCurrentCycle(subscription)
     const latestInvoice = pickLatestInvoice(subscription)
@@ -966,9 +934,10 @@ export const clientPortalService = {
       },
     })
 
+    // ✅ PRODUÇÃO: usa init_point (não sandbox_init_point)
     const checkoutUrl =
-      preference.sandbox_init_point ||
       preference.init_point ||
+      preference.sandbox_init_point ||
       null
 
     const { error: invoiceUpdateError } = await supabaseAdmin
@@ -981,9 +950,7 @@ export const clientPortalService = {
       .eq('id', latestInvoice.id)
       .eq('subscription_id', subscription.id)
 
-    if (invoiceUpdateError) {
-      throw new Error(invoiceUpdateError.message)
-    }
+    if (invoiceUpdateError) throw new Error(invoiceUpdateError.message)
 
     const refreshedSubscription = await subscriptionsService.getActiveByClient(
       auth.clientId,
@@ -991,6 +958,12 @@ export const clientPortalService = {
     )
 
     const refreshedLatestInvoice = pickLatestInvoice(refreshedSubscription)
+
+    // ✅ PRODUÇÃO: usa init_point (não sandbox_init_point)
+    const refreshedCheckoutUrl =
+      preference.init_point ||
+      preference.sandbox_init_point ||
+      null
 
     return {
       subscription: refreshedSubscription,
@@ -1000,12 +973,13 @@ export const clientPortalService = {
         preferenceId: preference.id,
         initPoint: preference.init_point || null,
         sandboxInitPoint: preference.sandbox_init_point || null,
-        paymentUrl: refreshedLatestInvoice?.payment_url || checkoutUrl,
+        paymentUrl: refreshedLatestInvoice?.payment_url || refreshedCheckoutUrl,
         invoiceId: refreshedLatestInvoice?.id || latestInvoice.id,
         status: refreshedLatestInvoice?.status || latestInvoice.status || 'pending',
       },
     }
   },
+
   async cancelPendingSubscription(auth: ClientAuthPayload, body: any) {
     const reason = normalizeText(body?.reason) || 'Contratação cancelada pelo cliente'
 
@@ -1019,13 +993,9 @@ export const clientPortalService = {
       .limit(1)
       .maybeSingle()
 
-    if (subscriptionError) {
-      throw new Error(subscriptionError.message)
-    }
+    if (subscriptionError) throw new Error(subscriptionError.message)
 
-    if (!subscription) {
-      throw new Error('Nenhuma contratação pendente encontrada')
-    }
+    if (!subscription) throw new Error('Nenhuma contratação pendente encontrada')
 
     await subscriptionsService.changeStatus(
       subscription.id,
@@ -1048,15 +1018,14 @@ export const clientPortalService = {
       .eq('subscription_id', subscription.id)
       .in('status', ['pending', 'open', 'created', 'authorized'])
 
-    if (invoiceError) {
-      throw new Error(invoiceError.message)
-    }
+    if (invoiceError) throw new Error(invoiceError.message)
 
     return {
       success: true,
       message: 'Contratação pendente cancelada com sucesso.',
     }
-  },  
+  },
+
   async getProfile(auth: ClientAuthPayload) {
     const [client, account] = await Promise.all([
       getClient(auth),
@@ -1083,25 +1052,13 @@ export const clientPortalService = {
     const whatsapp = normalizeText(body?.whatsapp)
     const whatsappDigits = normalizeDigits(whatsapp)
 
-    if (!name) {
-      throw new Error('Informe seu nome.')
-    }
-
-    if (!whatsapp) {
-      throw new Error('Informe seu telefone/WhatsApp.')
-    }
-
-    if (whatsappDigits.length < 10) {
-      throw new Error('Informe um telefone/WhatsApp válido.')
-    }
+    if (!name) throw new Error('Informe seu nome.')
+    if (!whatsapp) throw new Error('Informe seu telefone/WhatsApp.')
+    if (whatsappDigits.length < 10) throw new Error('Informe um telefone/WhatsApp válido.')
 
     const { error: clientError } = await supabaseAdmin
       .from('clients')
-      .update({
-        name,
-        whatsapp,
-        phone: whatsapp,
-      })
+      .update({ name, whatsapp, phone: whatsapp })
       .eq('id', auth.clientId)
       .eq('barbershop_id', auth.barbershopId)
 
@@ -1109,9 +1066,7 @@ export const clientPortalService = {
 
     const { error: accountError } = await supabaseAdmin
       .from('client_accounts')
-      .update({
-        whatsapp,
-      })
+      .update({ whatsapp })
       .eq('client_id', auth.clientId)
       .eq('barbershop_id', auth.barbershopId)
 
@@ -1125,21 +1080,10 @@ export const clientPortalService = {
     const newPassword = String(body?.newPassword || '')
     const confirmPassword = String(body?.confirmPassword || '')
 
-    if (!currentPassword) {
-      throw new Error('Informe sua senha atual.')
-    }
-
-    if (!newPassword) {
-      throw new Error('Informe a nova senha.')
-    }
-
-    if (newPassword.length < 6) {
-      throw new Error('A nova senha deve ter pelo menos 6 caracteres.')
-    }
-
-    if (newPassword !== confirmPassword) {
-      throw new Error('A confirmação da nova senha não confere.')
-    }
+    if (!currentPassword) throw new Error('Informe sua senha atual.')
+    if (!newPassword) throw new Error('Informe a nova senha.')
+    if (newPassword.length < 6) throw new Error('A nova senha deve ter pelo menos 6 caracteres.')
+    if (newPassword !== confirmPassword) throw new Error('A confirmação da nova senha não confere.')
 
     const account = await getClientAccount(auth)
 
@@ -1148,25 +1092,17 @@ export const clientPortalService = {
     }
 
     const matches = await bcrypt.compare(currentPassword, account.password_hash)
-
-    if (!matches) {
-      throw new Error('Sua senha atual está incorreta.')
-    }
+    if (!matches) throw new Error('Sua senha atual está incorreta.')
 
     const passwordHash = await bcrypt.hash(newPassword, 10)
 
     const { error } = await supabaseAdmin
       .from('client_accounts')
-      .update({
-        password_hash: passwordHash,
-      })
+      .update({ password_hash: passwordHash })
       .eq('id', account.id)
 
     if (error) throw new Error(error.message)
 
-    return {
-      success: true,
-      message: 'Senha alterada com sucesso.',
-    }
+    return { success: true, message: 'Senha alterada com sucesso.' }
   },
 }
