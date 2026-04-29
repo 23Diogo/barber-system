@@ -327,6 +327,7 @@ function pickLatestInvoice(subscription: any) {
   })[0] || null
 }
 
+// Valida janela de agendamento para um HORÁRIO específico (não para a data)
 function validateBookingWindow(barbershop: any, scheduledAt: Date) {
   if (!isFutureDate(scheduledAt)) {
     throw new Error('Escolha um horário futuro')
@@ -338,6 +339,29 @@ function validateBookingWindow(barbershop: any, scheduledAt: Date) {
   maxAllowed.setHours(23, 59, 59, 999)
 
   if (scheduledAt.getTime() > maxAllowed.getTime()) {
+    throw new Error(`Esta barbearia permite agendamento com no máximo ${bookingAdvanceDays} dias de antecedência`)
+  }
+}
+
+// Valida apenas se a DATA (não horário) não é passada — permite consultar slots de hoje
+function validateDateNotInPast(date: string, bookingAdvanceDays: number) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const requested = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(requested.getTime())) {
+    throw new Error('Data inválida')
+  }
+
+  if (requested < today) {
+    throw new Error('Escolha uma data a partir de hoje')
+  }
+
+  const maxAllowed = new Date()
+  maxAllowed.setDate(maxAllowed.getDate() + bookingAdvanceDays)
+  maxAllowed.setHours(23, 59, 59, 999)
+
+  if (requested.getTime() > maxAllowed.getTime()) {
     throw new Error(`Esta barbearia permite agendamento com no máximo ${bookingAdvanceDays} dias de antecedência`)
   }
 }
@@ -565,12 +589,9 @@ export const clientPortalService = {
       throw new Error(barbershop.absence_message || 'Barbearia indisponível no momento')
     }
 
-    const requestedDate = new Date(`${date}T00:00:00`)
-    if (Number.isNaN(requestedDate.getTime())) {
-      throw new Error('Data inválida')
-    }
-
-    validateBookingWindow(barbershop, requestedDate)
+    // ✅ Valida apenas se a data não é passada (permite hoje)
+    const bookingAdvanceDays = Number(barbershop?.booking_advance_days || 30)
+    validateDateNotInPast(date, bookingAdvanceDays)
 
     const slots = await appointmentsService.getAvailableSlots(
       auth.barbershopId,
@@ -612,6 +633,7 @@ export const clientPortalService = {
       throw new Error(barbershop.absence_message || 'Barbearia indisponível no momento')
     }
 
+    // Ao criar agendamento, valida o horário específico (deve ser futuro)
     validateBookingWindow(barbershop, scheduledAt)
 
     const relation = await validateBarberServiceRelation(barberId, serviceId)
