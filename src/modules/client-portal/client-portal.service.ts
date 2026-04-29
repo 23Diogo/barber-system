@@ -1132,4 +1132,71 @@ export const clientPortalService = {
 
     return { success: true, message: 'Senha alterada com sucesso.' }
   },
+// ── Adicionar este método dentro de clientPortalService, após changePassword ──
+
+  async rateAppointment(auth: ClientAuthPayload, appointmentId: string, body: any) {
+    const id      = String(appointmentId || '').trim()
+    const rating  = Number(body?.rating || 0)
+    const comment = String(body?.comment || '').trim()
+
+    if (!id) throw new Error('Agendamento inválido')
+    if (!rating || rating < 1 || rating > 5) throw new Error('Nota deve ser entre 1 e 5')
+
+    // Verifica se o agendamento pertence ao cliente e está concluído
+    const { data: appointment, error: apptError } = await supabaseAdmin
+      .from('appointments')
+      .select('id, client_id, barbershop_id, barber_id, status, rating')
+      .eq('id', id)
+      .eq('client_id', auth.clientId)
+      .eq('barbershop_id', auth.barbershopId)
+      .single()
+
+    if (apptError || !appointment) throw new Error('Agendamento não encontrado')
+    if (String(appointment.status) !== 'completed') throw new Error('Só é possível avaliar agendamentos concluídos')
+    if (appointment.rating != null) throw new Error('Este agendamento já foi avaliado')
+
+    // Insere na tabela reviews
+    const { error: reviewError } = await supabaseAdmin
+      .from('reviews')
+      .insert({
+        barbershop_id:  auth.barbershopId,
+        appointment_id: id,
+        client_id:      auth.clientId,
+        rating,
+        comment:        comment || null,
+      })
+
+    if (reviewError) throw new Error(reviewError.message)
+
+    // Atualiza o agendamento com a nota
+    const { error: updateError } = await supabaseAdmin
+      .from('appointments')
+      .update({
+        rating,
+        rating_comment: comment || null,
+        rated_at:       new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('barbershop_id', auth.barbershopId)
+
+    if (updateError) throw new Error(updateError.message)
+
+    // Recalcula média do barbeiro
+    const { data: reviews } = await supabaseAdmin
+      .from('reviews')
+      .select('rating')
+      .eq('barbershop_id', auth.barbershopId)
+      .eq('barber_id', appointment.barber_id)
+
+    if (reviews && reviews.length > 0) {
+      const avg = reviews.reduce((sum: number, r: any) => sum + Number(r.rating), 0) / reviews.length
+      await supabaseAdmin
+        .from('barber_profiles')
+        .update({ rating_avg: Math.round(avg * 10) / 10, rating_count: reviews.length })
+        .eq('id', appointment.barber_id)
+    }
+
+    return { ok: true, message: 'Avaliação enviada com sucesso.' }
+  },
+  
 }
