@@ -1155,15 +1155,17 @@ export const clientPortalService = {
     if (String(appointment.status) !== 'completed') throw new Error('Só é possível avaliar agendamentos concluídos')
     if (appointment.rating != null) throw new Error('Este agendamento já foi avaliado')
 
-    // Insere na tabela reviews
+    // Insere na tabela reviews (barber_id vem do appointment)
     const { error: reviewError } = await supabaseAdmin
       .from('reviews')
       .insert({
         barbershop_id:  auth.barbershopId,
         appointment_id: id,
         client_id:      auth.clientId,
+        barber_id:      appointment.barber_id || null,
         rating,
         comment:        comment || null,
+        is_public:      true,
       })
 
     if (reviewError) throw new Error(reviewError.message)
@@ -1181,19 +1183,23 @@ export const clientPortalService = {
 
     if (updateError) throw new Error(updateError.message)
 
-    // Recalcula média do barbeiro
-    const { data: reviews } = await supabaseAdmin
-      .from('reviews')
-      .select('rating')
-      .eq('barbershop_id', auth.barbershopId)
-      .eq('barber_id', appointment.barber_id)
+    // Recalcula média e contagem do barbeiro
+    if (appointment.barber_id) {
+      const { data: reviews } = await supabaseAdmin
+        .from('reviews')
+        .select('rating')
+        .eq('barber_id', appointment.barber_id)
 
-    if (reviews && reviews.length > 0) {
-      const avg = reviews.reduce((sum: number, r: any) => sum + Number(r.rating), 0) / reviews.length
-      await supabaseAdmin
-        .from('barber_profiles')
-        .update({ rating_avg: Math.round(avg * 10) / 10, rating_count: reviews.length })
-        .eq('id', appointment.barber_id)
+      if (reviews && reviews.length > 0) {
+        const avg = reviews.reduce((sum: number, r: any) => sum + Number(r.rating), 0) / reviews.length
+        await supabaseAdmin
+          .from('barber_profiles')
+          .update({
+            rating_avg:   Math.round(avg * 10) / 10,
+            rating_count: reviews.length,
+          })
+          .eq('id', appointment.barber_id)
+      }
     }
 
     return { ok: true, message: 'Avaliação enviada com sucesso.' }
