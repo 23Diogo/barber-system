@@ -47,7 +47,9 @@ function getUserObject(value: any) {
 }
 
 function isFutureDate(date: Date) {
-  return date.getTime() > Date.now()
+  // Compensa fuso horário UTC-3 (Brasília)
+  const nowBRT = Date.now() - (3 * 60 * 60 * 1000)
+  return date.getTime() > nowBRT
 }
 
 function diffHours(from: Date, to: Date) {
