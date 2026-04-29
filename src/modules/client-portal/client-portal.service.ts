@@ -125,7 +125,10 @@ function inferConsumptionType(service: any): ConsumptionType {
     raw.includes('corte') ||
     raw.includes('haircut') ||
     raw.includes('degrade') ||
-    raw.includes('degradê')
+    raw.includes('degradê') ||
+    raw.includes('cabelo') ||
+    raw.includes('cirte') ||
+    raw.includes('hair')
   ) {
     return 'haircut'
   }
