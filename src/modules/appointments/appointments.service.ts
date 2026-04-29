@@ -10,12 +10,13 @@ import {
 } from '../../services/notification.service'
 
 // ─── Helper: converte "HH:MM" em minutos desde meia-noite ─────────────────────
-
 function timeToMinutes(t: string | null | undefined, defaultHour: number): number {
   if (!t) return defaultHour * 60
   const [h, m] = t.split(':').map(Number)
   return (Number.isFinite(h) ? h : defaultHour) * 60 + (Number.isFinite(m) ? m : 0)
 }
+
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 
 export const appointmentsService = {
 
@@ -25,65 +26,45 @@ export const appointmentsService = {
     serviceId: string,
     date: string
   ) {
-    // ── Busca serviço e horário do barbeiro em paralelo ──────────────────────
     const [svcResult, barberResult, barbershopResult] = await Promise.all([
-      supabaseAdmin
-        .from('services')
-        .select('duration_min')
-        .eq('id', serviceId)
-        .single(),
-      supabaseAdmin
-        .from('barber_profiles')
-        .select('working_hours')
-        .eq('id', barberId)
-        .single(),
-      supabaseAdmin
-        .from('barbershops')
-        .select('working_hours')
-        .eq('id', barbershopId)
-        .single(),
+      supabaseAdmin.from('services').select('duration_min').eq('id', serviceId).single(),
+      supabaseAdmin.from('barber_profiles').select('working_hours').eq('id', barberId).single(),
+      supabaseAdmin.from('barbershops').select('working_hours').eq('id', barbershopId).single(),
     ])
 
     if (!svcResult.data) throw new Error('Serviço não encontrado')
 
     const durationMin = Number(svcResult.data.duration_min || 30)
-
-    // Usa horários do barbeiro se configurados, senão usa da barbearia, senão fallback
     const barberWh    = barberResult.data?.working_hours || {}
     const shopWh      = barbershopResult.data?.working_hours || {}
 
-    // Determina o dia da semana para buscar horário específico do dia
+    // Descobre o dia da semana da data solicitada
     const requestedDate = new Date(`${date}T12:00:00`)
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-    const dayName = dayNames[requestedDate.getDay()]
+    const dayName = DAY_NAMES[requestedDate.getDay()]
 
-    // Tenta pegar horário do dia específico na barbearia
+    // ── Horário da BARBEARIA (formato: { monday: { open, close, active } }) ──
     const shopDayConfig = shopWh[dayName]
-    const shopDayEnabled = shopDayConfig?.enabled !== false && shopDayConfig?.isOpen !== false
 
-    // Se a barbearia tem config do dia e está fechada, retorna vazio
-    if (shopDayConfig && !shopDayEnabled) {
+    // Se a barbearia tem config do dia e está inativa, retorna vazio
+    if (shopDayConfig && shopDayConfig.active === false) {
       return []
     }
 
-    // Horários: prioriza barbeiro, depois barbearia, depois fallback
+    // ── Horário do BARBEIRO (formato: { start, end, lunch_start, lunch_end, slot_interval }) ──
+    // Prioridade: barbeiro → dia da barbearia → fallback
     const startMin = barberWh.start
       ? timeToMinutes(barberWh.start, 8)
-      : shopDayConfig?.start
-        ? timeToMinutes(shopDayConfig.start, 8)
-        : shopWh.start
-          ? timeToMinutes(shopWh.start, 8)
-          : 8 * 60
+      : shopDayConfig?.open
+        ? timeToMinutes(shopDayConfig.open, 8)
+        : 8 * 60
 
     const endMin = barberWh.end
       ? timeToMinutes(barberWh.end, 19)
-      : shopDayConfig?.end
-        ? timeToMinutes(shopDayConfig.end, 19)
-        : shopWh.end
-          ? timeToMinutes(shopWh.end, 19)
-          : 19 * 60
+      : shopDayConfig?.close
+        ? timeToMinutes(shopDayConfig.close, 19)
+        : 19 * 60
 
-    const interval      = Number(barberWh.slot_interval || shopWh.slot_interval || 30)
+    const interval      = Number(barberWh.slot_interval || 30)
     const hasLunch      = Boolean(barberWh.lunch_start && barberWh.lunch_end)
     const lunchStartMin = hasLunch ? timeToMinutes(barberWh.lunch_start, 12) : null
     const lunchEndMin   = hasLunch ? timeToMinutes(barberWh.lunch_end,   13) : null
@@ -98,8 +79,6 @@ export const appointmentsService = {
       .neq('status', 'cancelled')
 
     const now = Date.now()
-
-    // ── Gera slots dentro do horário de trabalho ─────────────────────────────
     const slots: string[] = []
 
     for (let minute = startMin; minute < endMin; minute += interval) {
@@ -120,10 +99,10 @@ export const appointmentsService = {
       )
       const end = new Date(start.getTime() + durationMin * 60_000)
 
-      // ✅ Filtra slots que já passaram (para o dia de hoje)
+      // ✅ Filtra slots que já passaram
       if (start.getTime() <= now) continue
 
-      // Verifica conflito com agendamentos já existentes
+      // ✅ Verifica conflito com agendamentos existentes
       const conflict = existing?.some(
         a => start < new Date(a.ends_at) && end > new Date(a.scheduled_at)
       )
