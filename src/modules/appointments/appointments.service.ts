@@ -26,7 +26,7 @@ export const appointmentsService = {
     date: string
   ) {
     // ── Busca serviço e horário do barbeiro em paralelo ──────────────────────
-    const [svcResult, barberResult] = await Promise.all([
+    const [svcResult, barberResult, barbershopResult] = await Promise.all([
       supabaseAdmin
         .from('services')
         .select('duration_min')
@@ -37,20 +37,56 @@ export const appointmentsService = {
         .select('working_hours')
         .eq('id', barberId)
         .single(),
+      supabaseAdmin
+        .from('barbershops')
+        .select('working_hours')
+        .eq('id', barbershopId)
+        .single(),
     ])
 
     if (!svcResult.data) throw new Error('Serviço não encontrado')
 
     const durationMin = Number(svcResult.data.duration_min || 30)
-    const wh          = barberResult.data?.working_hours || {}
 
-    // ── Parâmetros de horário do barbeiro (fallback: 08:00–19:00, almoço 12:00–13:00) ──
-    const startMin      = timeToMinutes(wh.start,       8)
-    const endMin        = timeToMinutes(wh.end,        19)
-    const interval      = Number(wh.slot_interval || 30)
-    const hasLunch      = Boolean(wh.lunch_start && wh.lunch_end)
-    const lunchStartMin = hasLunch ? timeToMinutes(wh.lunch_start, 12) : null
-    const lunchEndMin   = hasLunch ? timeToMinutes(wh.lunch_end,   13) : null
+    // Usa horários do barbeiro se configurados, senão usa da barbearia, senão fallback
+    const barberWh    = barberResult.data?.working_hours || {}
+    const shopWh      = barbershopResult.data?.working_hours || {}
+
+    // Determina o dia da semana para buscar horário específico do dia
+    const requestedDate = new Date(`${date}T12:00:00`)
+    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    const dayName = dayNames[requestedDate.getDay()]
+
+    // Tenta pegar horário do dia específico na barbearia
+    const shopDayConfig = shopWh[dayName]
+    const shopDayEnabled = shopDayConfig?.enabled !== false && shopDayConfig?.isOpen !== false
+
+    // Se a barbearia tem config do dia e está fechada, retorna vazio
+    if (shopDayConfig && !shopDayEnabled) {
+      return []
+    }
+
+    // Horários: prioriza barbeiro, depois barbearia, depois fallback
+    const startMin = barberWh.start
+      ? timeToMinutes(barberWh.start, 8)
+      : shopDayConfig?.start
+        ? timeToMinutes(shopDayConfig.start, 8)
+        : shopWh.start
+          ? timeToMinutes(shopWh.start, 8)
+          : 8 * 60
+
+    const endMin = barberWh.end
+      ? timeToMinutes(barberWh.end, 19)
+      : shopDayConfig?.end
+        ? timeToMinutes(shopDayConfig.end, 19)
+        : shopWh.end
+          ? timeToMinutes(shopWh.end, 19)
+          : 19 * 60
+
+    const interval      = Number(barberWh.slot_interval || shopWh.slot_interval || 30)
+    const hasLunch      = Boolean(barberWh.lunch_start && barberWh.lunch_end)
+    const lunchStartMin = hasLunch ? timeToMinutes(barberWh.lunch_start, 12) : null
+    const lunchEndMin   = hasLunch ? timeToMinutes(barberWh.lunch_end,   13) : null
 
     // ── Agendamentos existentes do barbeiro neste dia ────────────────────────
     const { data: existing } = await supabaseAdmin
@@ -60,6 +96,8 @@ export const appointmentsService = {
       .gte('scheduled_at', `${date}T00:00:00`)
       .lte('scheduled_at', `${date}T23:59:59`)
       .neq('status', 'cancelled')
+
+    const now = Date.now()
 
     // ── Gera slots dentro do horário de trabalho ─────────────────────────────
     const slots: string[] = []
@@ -81,6 +119,9 @@ export const appointmentsService = {
         `${date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`
       )
       const end = new Date(start.getTime() + durationMin * 60_000)
+
+      // ✅ Filtra slots que já passaram (para o dia de hoje)
+      if (start.getTime() <= now) continue
 
       // Verifica conflito com agendamentos já existentes
       const conflict = existing?.some(
