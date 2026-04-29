@@ -78,7 +78,6 @@ export const appointmentsService = {
       .lte('scheduled_at', `${date}T23:59:59`)
       .neq('status', 'cancelled')
 
-    const now = Date.now()
     const slots: string[] = []
 
     for (let minute = startMin; minute < endMin; minute += interval) {
@@ -99,8 +98,9 @@ export const appointmentsService = {
       )
       const end = new Date(start.getTime() + durationMin * 60_000)
 
-      // ✅ Filtra slots que já passaram
-      if (start.getTime() <= now) continue
+      // ✅ Filtra slots que já passaram (considera fuso UTC-3 / Brasília)
+      const nowBRT = Date.now() - (3 * 60 * 60 * 1000)
+      if (start.getTime() <= nowBRT) continue
 
       // ✅ Verifica conflito com agendamentos existentes
       const conflict = existing?.some(
