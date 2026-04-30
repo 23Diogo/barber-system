@@ -29,6 +29,10 @@ import barberAuthRoutes    from './modules/barbers/barber-auth.routes'
 
 import testNotifRoutes     from './modules/barbershops/test-notifications.routes'
 
+// Relatorio
+import reportsRouter from './modules/reports/reports.routes'
+
+
 // ─── Jobs existentes ──────────────────────────────────────────────────────────
 import { startLicenseCheckJob } from './jobs/checkLicenses'
 import { startReminderJob }     from './jobs/sendReminders'
@@ -100,7 +104,7 @@ app.use('/api/barbershops',   invitesRouter)
 app.use('/api/barber-auth',   barberAuthRoutes)
 
 app.use('/api/test-notifications', testNotifRoutes)
-
+app.use('/api/reports', reportsRouter)
 // ─── Error handler global ─────────────────────────────────────────────────────
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('❌', err.message)
