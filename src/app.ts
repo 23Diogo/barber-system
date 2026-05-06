@@ -29,7 +29,8 @@ import barberAuthRoutes    from './modules/barbers/barber-auth.routes'
 import testNotifRoutes     from './modules/barbershops/test-notifications.routes'
 import reportsRouter       from './modules/reports/reports.routes'
 
-// ─── Middleware de licença da plataforma ──────────────────────────────────────
+// ─── Middlewares de autenticação e licença ────────────────────────────────────
+import { authenticate }         from './middleware/auth'
 import { checkPlatformLicense } from './middleware/platformLicense'
 
 // ─── Jobs existentes ──────────────────────────────────────────────────────────
@@ -87,25 +88,26 @@ app.use('/api/whatsapp',      whatsappRoutes)
 app.use('/api/mercadopago',   mercadoPagoRoutes)
 app.use('/api/barber-auth',   barberAuthRoutes)
 
-// ─── Rotas protegidas (exigem licença ativa da plataforma) ────────────────────
-app.use('/api/barbershops',   checkPlatformLicense, barbershopRoutes)
-app.use('/api/appointments',  checkPlatformLicense, appointmentRoutes)
-app.use('/api/clients',       checkPlatformLicense, clientRoutes)
-app.use('/api/services',      checkPlatformLicense, serviceRoutes)
-app.use('/api/barbers',       checkPlatformLicense, barberRoutes)
-app.use('/api/financial',     checkPlatformLicense, financialRoutes)
-app.use('/api/stock',         checkPlatformLicense, stockRoutes)
-app.use('/api/loyalty',       checkPlatformLicense, loyaltyRoutes)
-app.use('/api/marketing',     checkPlatformLicense, marketingRoutes)
-app.use('/api/dashboard',     checkPlatformLicense, dashboardRoutes)
-app.use('/api/plans',         checkPlatformLicense, plansRoutes)
-app.use('/api/subscriptions', checkPlatformLicense, subscriptionsRoutes)
-app.use('/api/payments',      checkPlatformLicense, paymentsRoutes)
-app.use('/api/reviews',       checkPlatformLicense, reviewsRoutes)
-app.use('/api/barbershops',   checkPlatformLicense, invitesRouter)
-app.use('/api/reports',       checkPlatformLicense, reportsRouter)
-
-app.use('/api/test-notifications', checkPlatformLicense, testNotifRoutes)
+// ─── Rotas protegidas (authenticate → checkPlatformLicense → handler) ─────────
+// Ordem obrigatória: authenticate primeiro para popular req.user,
+// depois checkPlatformLicense que depende de req.user.barbershopId
+app.use('/api/barbershops',        authenticate, checkPlatformLicense, barbershopRoutes)
+app.use('/api/appointments',       authenticate, checkPlatformLicense, appointmentRoutes)
+app.use('/api/clients',            authenticate, checkPlatformLicense, clientRoutes)
+app.use('/api/services',           authenticate, checkPlatformLicense, serviceRoutes)
+app.use('/api/barbers',            authenticate, checkPlatformLicense, barberRoutes)
+app.use('/api/financial',          authenticate, checkPlatformLicense, financialRoutes)
+app.use('/api/stock',              authenticate, checkPlatformLicense, stockRoutes)
+app.use('/api/loyalty',            authenticate, checkPlatformLicense, loyaltyRoutes)
+app.use('/api/marketing',          authenticate, checkPlatformLicense, marketingRoutes)
+app.use('/api/dashboard',          authenticate, checkPlatformLicense, dashboardRoutes)
+app.use('/api/plans',              authenticate, checkPlatformLicense, plansRoutes)
+app.use('/api/subscriptions',      authenticate, checkPlatformLicense, subscriptionsRoutes)
+app.use('/api/payments',           authenticate, checkPlatformLicense, paymentsRoutes)
+app.use('/api/reviews',            authenticate, checkPlatformLicense, reviewsRoutes)
+app.use('/api/barbershops',        authenticate, checkPlatformLicense, invitesRouter)
+app.use('/api/reports',            authenticate, checkPlatformLicense, reportsRouter)
+app.use('/api/test-notifications', authenticate, checkPlatformLicense, testNotifRoutes)
 
 // ─── Error handler global ─────────────────────────────────────────────────────
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
