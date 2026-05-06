@@ -18,7 +18,9 @@ export const receiveWebhook = async (req: Request, res: Response) => {
   res.sendStatus(200)
   console.log('📨 WEBHOOK BODY:', JSON.stringify(req.body, null, 2))
   try {
-    const body = typeof req.body === 'string'
+    const body = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString())
+      : typeof req.body === 'string'
       ? JSON.parse(req.body)
       : req.body
 
