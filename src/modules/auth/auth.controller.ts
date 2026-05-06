@@ -45,10 +45,31 @@ export const me = async (req: Request, res: Response) => {
   }
 }
 
+// ─── Gera link de pagamento da licença da plataforma ─────────────────────────
+export const generatePaymentLink = async (req: Request, res: Response) => {
+  try {
+    const barbershopId = req.user!.barbershopId
+
+    const { data: user } = await supabaseAdmin
+      .from('users')
+      .select('email')
+      .eq('id', req.user!.userId)
+      .single()
+
+    if (!user?.email) {
+      return res.status(400).json({ error: 'Usuário não encontrado.' })
+    }
+
+    const result = await authService.generatePaymentLink(barbershopId, user.email)
+    res.json(result)
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
 // ─── Recuperação de senha ─────────────────────────────────────────────────────
 
 export const forgotPassword = async (req: Request, res: Response) => {
-  // Sempre retorna 200 para não revelar se o e-mail existe
   const ok = { ok: true, message: 'Se o e-mail estiver cadastrado, você receberá as instruções em breve.' }
 
   try {
@@ -64,28 +85,22 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     if (!user) return res.json(ok)
 
-    // Gera token seguro
     const rawToken  = crypto.randomBytes(32).toString('hex')
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex')
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString() // 1 hora
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
 
-    // Invalida tokens anteriores do mesmo usuário
     await supabaseAdmin
       .from('password_reset_tokens')
       .update({ used_at: new Date().toISOString() })
       .eq('user_id', user.id)
       .is('used_at', null)
 
-    // Insere novo token
     await supabaseAdmin.from('password_reset_tokens').insert({
       user_id:    user.id,
       token_hash: tokenHash,
       expires_at: expiresAt,
     })
 
-    const shopName = (user.barbershops as any)?.name || 'BarberFlow'
-
-    // Dispara e-mail
     setImmediate(() => {
       sendPasswordResetOwner({
         email:      user.email,
@@ -97,7 +112,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
     res.json(ok)
   } catch (err: any) {
     console.error('forgotPassword error:', err?.message)
-    res.json(ok) // nunca expõe erro ao cliente
+    res.json(ok)
   }
 }
 
