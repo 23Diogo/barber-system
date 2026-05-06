@@ -25,13 +25,12 @@ import paymentsRoutes      from './modules/payments/payments.routes'
 import mercadoPagoRoutes   from './modules/mercadopago/mercadopago.routes'
 import reviewsRoutes       from './modules/reviews/reviews.routes'
 import invitesRouter       from './modules/barbershops/invites.routes'
-import barberAuthRoutes    from './modules/barbers/barber-auth.routes' 
-
+import barberAuthRoutes    from './modules/barbers/barber-auth.routes'
 import testNotifRoutes     from './modules/barbershops/test-notifications.routes'
+import reportsRouter       from './modules/reports/reports.routes'
 
-// Relatorio
-import reportsRouter from './modules/reports/reports.routes'
-
+// ─── Middleware de licença da plataforma ──────────────────────────────────────
+import { checkPlatformLicense } from './middleware/platformLicense'
 
 // ─── Jobs existentes ──────────────────────────────────────────────────────────
 import { startLicenseCheckJob } from './jobs/checkLicenses'
@@ -80,31 +79,34 @@ app.get('/health', (_, res) =>
   res.json({ status: 'ok', app: 'BarberFlow API', version: '1.0.0' })
 )
 
-// ─── Rotas da API ─────────────────────────────────────────────────────────────
+// ─── Rotas públicas (sem verificação de licença da plataforma) ────────────────
 app.use('/api/auth',          authRoutes)
 app.use('/api/client-auth',   clientAuthRoutes)
 app.use('/api/client-portal', clientPortalRoutes)
-app.use('/api/barbershops',   barbershopRoutes)
-app.use('/api/appointments',  appointmentRoutes)
-app.use('/api/clients',       clientRoutes)
-app.use('/api/services',      serviceRoutes)
-app.use('/api/barbers',       barberRoutes)
-app.use('/api/financial',     financialRoutes)
-app.use('/api/stock',         stockRoutes)
-app.use('/api/loyalty',       loyaltyRoutes)
 app.use('/api/whatsapp',      whatsappRoutes)
-app.use('/api/marketing',     marketingRoutes)
-app.use('/api/dashboard',     dashboardRoutes)
-app.use('/api/plans',         plansRoutes)
-app.use('/api/subscriptions', subscriptionsRoutes)
-app.use('/api/payments',      paymentsRoutes)
 app.use('/api/mercadopago',   mercadoPagoRoutes)
-app.use('/api/reviews',       reviewsRoutes)
-app.use('/api/barbershops',   invitesRouter)
 app.use('/api/barber-auth',   barberAuthRoutes)
 
-app.use('/api/test-notifications', testNotifRoutes)
-app.use('/api/reports', reportsRouter)
+// ─── Rotas protegidas (exigem licença ativa da plataforma) ────────────────────
+app.use('/api/barbershops',   checkPlatformLicense, barbershopRoutes)
+app.use('/api/appointments',  checkPlatformLicense, appointmentRoutes)
+app.use('/api/clients',       checkPlatformLicense, clientRoutes)
+app.use('/api/services',      checkPlatformLicense, serviceRoutes)
+app.use('/api/barbers',       checkPlatformLicense, barberRoutes)
+app.use('/api/financial',     checkPlatformLicense, financialRoutes)
+app.use('/api/stock',         checkPlatformLicense, stockRoutes)
+app.use('/api/loyalty',       checkPlatformLicense, loyaltyRoutes)
+app.use('/api/marketing',     checkPlatformLicense, marketingRoutes)
+app.use('/api/dashboard',     checkPlatformLicense, dashboardRoutes)
+app.use('/api/plans',         checkPlatformLicense, plansRoutes)
+app.use('/api/subscriptions', checkPlatformLicense, subscriptionsRoutes)
+app.use('/api/payments',      checkPlatformLicense, paymentsRoutes)
+app.use('/api/reviews',       checkPlatformLicense, reviewsRoutes)
+app.use('/api/barbershops',   checkPlatformLicense, invitesRouter)
+app.use('/api/reports',       checkPlatformLicense, reportsRouter)
+
+app.use('/api/test-notifications', checkPlatformLicense, testNotifRoutes)
+
 // ─── Error handler global ─────────────────────────────────────────────────────
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('❌', err.message)
