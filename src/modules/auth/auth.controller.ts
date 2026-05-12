@@ -161,22 +161,30 @@ export const resetPassword = async (req: Request, res: Response) => {
   }
 }
 
-// ─── Meta OAuth: inicia o fluxo ──────────────────────────────────────────────
+// ─── Meta OAuth: retorna a URL de autorização ────────────────────────────────
+// POST /api/auth/meta/connect  (requer authenticate)
+// Retorna { url } — o frontend redireciona via window.location.href
 export const metaConnect = async (req: Request, res: Response) => {
-  const barbershopId = req.user!.barbershopId
+  try {
+    const barbershopId = req.user!.barbershopId
 
-  const params = new URLSearchParams({
-    client_id:     process.env.META_APP_ID!,
-    redirect_uri:  process.env.META_REDIRECT_URI!,
-    scope:         'whatsapp_business_messaging,whatsapp_business_management',
-    response_type: 'code',
-    state:         barbershopId,
-  })
+    const params = new URLSearchParams({
+      client_id:     process.env.META_APP_ID!,
+      redirect_uri:  process.env.META_REDIRECT_URI!,
+      scope:         'whatsapp_business_messaging,whatsapp_business_management',
+      response_type: 'code',
+      state:         barbershopId,
+    })
 
-  res.redirect(`https://www.facebook.com/v19.0/dialog/oauth?${params}`)
+    const url = `https://www.facebook.com/v19.0/dialog/oauth?${params}`
+    res.json({ url })
+  } catch (err: any) {
+    res.status(400).json({ error: err.message })
+  }
 }
 
 // ─── Meta OAuth: callback ─────────────────────────────────────────────────────
+// GET /api/auth/meta/callback  (público — Meta redireciona aqui)
 export const metaCallback = async (req: Request, res: Response) => {
   const { code, state: barbershopId, error } = req.query
   const frontendUrl = process.env.FRONTEND_URL!
