@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import axios from 'axios'
 import bcrypt from 'bcryptjs'
 import { Request, Response } from 'express'
 import { authService } from './auth.service'
@@ -157,5 +158,66 @@ export const resetPassword = async (req: Request, res: Response) => {
     res.json({ ok: true, message: 'Senha redefinida com sucesso.' })
   } catch (err: any) {
     res.status(400).json({ error: err.message })
+  }
+}
+
+// ─── Meta OAuth: inicia o fluxo ──────────────────────────────────────────────
+export const metaConnect = async (req: Request, res: Response) => {
+  const barbershopId = req.user!.barbershopId
+
+  const params = new URLSearchParams({
+    client_id:     process.env.META_APP_ID!,
+    redirect_uri:  process.env.META_REDIRECT_URI!,
+    scope:         'whatsapp_business_messaging,whatsapp_business_management',
+    response_type: 'code',
+    state:         barbershopId,
+  })
+
+  res.redirect(`https://www.facebook.com/v19.0/dialog/oauth?${params}`)
+}
+
+// ─── Meta OAuth: callback ─────────────────────────────────────────────────────
+export const metaCallback = async (req: Request, res: Response) => {
+  const { code, state: barbershopId, error } = req.query
+  const frontendUrl = process.env.FRONTEND_URL!
+
+  if (error || !code || !barbershopId) {
+    return res.redirect(`${frontendUrl}/app/configuracoes?meta_status=error`)
+  }
+
+  try {
+    // 1. Troca o code pelo access_token
+    const tokenRes = await axios.get('https://graph.facebook.com/v19.0/oauth/access_token', {
+      params: {
+        client_id:     process.env.META_APP_ID,
+        client_secret: process.env.META_APP_SECRET,
+        redirect_uri:  process.env.META_REDIRECT_URI,
+        code,
+      },
+    })
+
+    const accessToken = tokenRes.data.access_token
+
+    // 2. Busca o Phone Number ID da conta WA Business
+    const waRes = await axios.get('https://graph.facebook.com/v19.0/me/whatsapp_business_accounts', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    const phoneNumberId = waRes.data.data?.[0]?.phone_numbers?.[0]?.id ?? null
+
+    // 3. Salva no banco
+    await supabaseAdmin
+      .from('barbershops')
+      .update({
+        meta_access_token: accessToken,
+        meta_phone_id:     phoneNumberId,
+        updated_at:        new Date().toISOString(),
+      })
+      .eq('id', barbershopId)
+
+    res.redirect(`${frontendUrl}/app/configuracoes?meta_status=success`)
+  } catch (err: any) {
+    console.error('❌ [meta/callback]', err?.response?.data || err?.message)
+    res.redirect(`${frontendUrl}/app/configuracoes?meta_status=error`)
   }
 }
