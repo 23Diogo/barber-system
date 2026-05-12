@@ -23,7 +23,7 @@ router.post('/reset-password',  resetPassword)
 router.post('/payment-link',    authenticate, generatePaymentLink)
 
 // ─── Meta OAuth ───────────────────────────────────────────────────────────────
-router.get('/meta/connect',     authenticate, metaConnect)
-router.get('/meta/callback',    metaCallback)
+router.post('/meta/connect',    authenticate, metaConnect)  // retorna { url }
+router.get('/meta/callback',    metaCallback)               // público — Meta redireciona aqui
 
 export default router
